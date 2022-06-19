@@ -113,9 +113,9 @@ def measure_candidates(database, builder, runner):
                 batch_runner_results = context._join()  # pylint: disable=protected-access
             runner_results.extend(batch_runner_results)
             for i, result in enumerate(context.builder_results):
-                if result.error_msg is None:
+                if result.artifact_path is not None:
                     ms.utils.remove_build_dir(result.artifact_path)
-                else:
+                if result.error_msg is not None:
                     build_fail_indices.append(i + idx)
             context._clear_measure_state()  # pylint: disable=protected-access
 
@@ -180,8 +180,9 @@ def main():
     except OSError:
         print(f"Directory {args.result_cache_dir} cannot be created successfully.")
     model_dirs = glob.glob(os.path.join(args.candidate_cache_dir, "*"))
-    for model_dir in model_dirs:
+    for n, model_dir in enumerate(model_dirs):
         model_name = model_dir.split("/")[-1]
+        print(f'entering model dir {n}: {model_name}')
         os.makedirs(os.path.join(args.result_cache_dir, model_name), exist_ok=True)
         all_tasks = glob.glob(os.path.join(model_dir, "*.json"))
         workload_paths = []
