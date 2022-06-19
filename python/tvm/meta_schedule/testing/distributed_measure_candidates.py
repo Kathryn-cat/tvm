@@ -18,6 +18,7 @@
 
 import argparse
 import glob
+import json
 import os
 
 from tqdm import tqdm  # type: ignore
@@ -54,7 +55,7 @@ def _parse_args():
     parser.add_argument(
         "--builder_timeout_sec",
         type=int,
-        default=10,
+        default=30,
         help="The time for the builder session to time out.",
     )
     parser.add_argument(
@@ -138,11 +139,13 @@ def measure_candidates(database, builder, runner):
             )
         else:
             run_fail_indices.append(i)
-    fail_indices_name = workload_name.replace("_workload.json", "_failed_indices.txt")
+    fail_indices_name = workload_name.replace("_workload.json", "_run_error_msgs.json")
     with open(
         os.path.join(args.result_cache_dir, model_name, fail_indices_name), "w", encoding="utf8"
     ) as file:
-        file.write(" ".join([str(n) for n in run_fail_indices]))
+        for i in run_fail_indices:
+            json_str = json.dumps([i, runner_results[i].error_msg])
+            file.write(json_str + "\n")
     print(
         f"Builder time: {profiler.get()['build']}, Runner time: {profiler.get()['run']}\n\
             Failed number of builds: {len(build_fail_indices)},\
