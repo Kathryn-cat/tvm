@@ -32,6 +32,62 @@
 namespace tvm {
 namespace meta_schedule {
 
+template <class K, class V>
+using ObjMap = std::unordered_map<const K*, V>;
+
+template <class K1, class K2, class V>
+using ObjPairMap = ObjMap<K1, ObjMap<K2, V>>;
+
+using NDIntSet = Array<arith::IntSet>;
+
+std::ostream& operator<<(std::ostream& os, const NDIntSet& nd_int_set) {
+  os << '[';
+  bool is_first = true;
+  for (const arith::IntSet& int_set : nd_int_set) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      os << ", ";
+    }
+    PrimExpr min = int_set.min();
+    PrimExpr max = int_set.max();
+    os << min << ":" << max;
+  }
+  os << ']';
+  return os;
+}
+
+struct FeatureSet {
+  // Group 1: Computation related features
+  // Group 2: Buffer access related features (per buffer)
+  // Group 3: Arithmetic intensity related features
+  // Group 4: Allocation related features
+  // Group 5: Outer scope related features
+};
+
+#define TVM_FEATURE_INC_CNT(DType, FloatCounter, IntCounter) \
+  if (DType.is_float()) {                                    \
+    ++result_->FloatCounter;                                 \
+  } else {                                                   \
+    ++result_->IntCounter;                                   \
+  }
+
+#define TVM_FEATURE_SIMPLE(Type, Counter) \
+  void VisitExpr_(const Type* op) final { \
+    ++result_->Counter;                   \
+    StmtExprVisitor::VisitExpr_(op);      \
+  }
+
+#define TVM_FEATURE_BINARY(Type, FloatCounter, IntCounter) \
+  void VisitExpr_(const Type* op) final {                  \
+    if (op->dtype.is_float()) {                            \
+      ++result_->FloatCounter;                             \
+    } else {                                               \
+      ++result_->IntCounter;                               \
+    }                                                      \
+    StmtExprVisitor::VisitExpr_(op);                       \
+  }
+
 runtime::NDArray PerBlockFeature(const tir::Schedule& sch, int max_num_buffer_access_features) {}
 
 Array<String> PerBlockFeatureNames(int max_num_buffer_access_features) {}
