@@ -146,6 +146,56 @@ class CoefficientExtractor : public tir::StmtExprVisitor {
   bool visited_mul;
 };
 
+class PerBlockFeatureExtractor : public tir::StmtExprVisitor {
+ public:
+  static std::vector<FeatureSet> Extract(const tir::PrimFunc& func) {
+    PerBlockFeatureExtractor extractor;
+    extractor.VisitStmt(func->body);
+    std::vector<FeatureSet> result;
+    result.reserve(extractor.ordered_blocks_.size());
+    for (const tir::BlockRealizeNode* realize : extractor.ordered_blocks_) {
+      if (!realize->block->name_hint.empty()) {
+        result.push_back(extractor.per_block_feature_.at(realize));
+      }
+    }
+    return result;
+  }
+
+ private:
+  /******** Data structure used in recursive visiting ********/
+  /*! \brief The scope info used in recursive visiting */
+  std::vector<const tir::BlockRealizeNode*> scopes_;
+  /*! \brief The loop / block-realize visited up-down in the DFS path */
+  std::vector<const tir::StmtNode*> dfs_path_;
+  // The stacks to store different kinds of for-loops
+  std::vector<const tir::ForNode*> loops_;
+  std::vector<const tir::ForNode*> parallel_;
+  std::vector<const tir::ForNode*> vectorize_;
+  std::vector<const tir::ForNode*> unroll_;
+  std::vector<const tir::ForNode*> blockIdx_x_;
+  std::vector<const tir::ForNode*> blockIdx_y_;
+  std::vector<const tir::ForNode*> blockIdx_z_;
+  std::vector<const tir::ForNode*> threadIdx_x_;
+  std::vector<const tir::ForNode*> threadIdx_y_;
+  std::vector<const tir::ForNode*> threadIdx_z_;
+  std::vector<const tir::ForNode*> vthread_;
+  std::vector<int64_t> auto_unroll_;
+  /*! \brief The persistent analyzer */
+  mutable arith::Analyzer analyzer_;
+  /*! \brief The product of the extents of outer loops */
+  int64_t outer_loop_prod_ = 1;
+  /*!
+   * \brief For a specific buffer, record the regions it is acccessed under a specific loop.
+   * The information is preserved across different blocks and is used for detecting serial buffer
+   * reuse
+   */
+  ObjPairMap<tir::ForNode, tir::BufferNode, std::vector<int64_t>> buffer_touched_under_loop_;
+  /*! \brief The output: features for each BlockRealizeNode */
+  ObjMap<tir::BlockRealizeNode, FeatureSet> per_block_feature_;
+  /*! \brief The pre-order visit order of all the BlockRealizeNodes */
+  std::vector<const tir::BlockRealizeNode*> ordered_blocks_;
+};
+
 runtime::NDArray PerBlockFeature(const tir::Schedule& sch, int max_num_buffer_access_features) {}
 
 Array<String> PerBlockFeatureNames(int max_num_buffer_access_features) {}
