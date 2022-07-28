@@ -40,6 +40,14 @@ using ObjPairMap = ObjMap<K1, ObjMap<K2, V>>;
 
 using NDIntSet = Array<arith::IntSet>;
 
+// shifted log to incorporate the property that slog(0) = 0
+inline double slog(double x) {
+  if (x < 0) {
+    x = -x;
+  }
+  return std::log2(x + 1);
+}
+
 std::ostream& operator<<(std::ostream& os, const NDIntSet& nd_int_set) {
   os << '[';
   bool is_first = true;
@@ -56,6 +64,43 @@ std::ostream& operator<<(std::ostream& os, const NDIntSet& nd_int_set) {
   os << ']';
   return os;
 }
+
+struct DoubleNDArrayPusher {
+  explicit DoubleNDArrayPusher(const std::vector<int64_t>& shape)
+      : array(runtime::NDArray::Empty(/*shape=*/shape, /*dtype=*/DLDataType{kDLFloat, 64, 1},
+                                      /*ctx=*/DLDevice{kDLCPU, 0})),
+        back(static_cast<double*>(array->data)) {}
+
+  template <class TIter>
+  void Push(TIter begin, TIter end) {
+    while (begin != end) {
+      *back = *begin;
+      ++back;
+      ++begin;
+    }
+  }
+
+  void PushRepeat(int n, double value) {
+    while (n-- > 0) {
+      *back = value;
+      ++back;
+    }
+  }
+
+  runtime::NDArray Done() {
+    int64_t* shape = array->shape;
+    int64_t array_size = 1;
+    for (int i = 0, ndim = array->ndim; i < ndim; ++i) {
+      array_size *= shape[i];
+    }
+    int64_t written_size = back - static_cast<double*>(array->data);
+    ICHECK_EQ(array_size, written_size);
+    return std::move(array);
+  }
+
+  runtime::NDArray array;
+  double* back;
+};
 
 struct FeatureSet {
   // Group 1: Computation related features
