@@ -59,6 +59,7 @@ std::ostream& operator<<(std::ostream& os, const NDIntSet& nd_int_set) {
 
 struct FeatureSet {
   // Group 1: Computation related features
+  const tir::BlockRealizeNode* block_realize;
   // Group 2: Buffer access related features (per buffer)
   // Group 3: Arithmetic intensity related features
   // Group 4: Allocation related features
@@ -159,6 +160,130 @@ class PerBlockFeatureExtractor : public tir::StmtExprVisitor {
       }
     }
     return result;
+  }
+
+ private:
+  /******** Visitors ********/
+  void VisitStmt_(const tir::BlockRealizeNode* realize) override {
+    if (!scopes_.empty()) {
+      ordered_blocks_.push_back(realize);
+    }
+    scopes_.push_back(realize);
+    dfs_path_.push_back(realize);
+    tir::StmtExprVisitor::VisitStmt_(realize);
+    dfs_path_.pop_back();
+    scopes_.pop_back();
+    if (scopes_.empty()) {
+      return;
+    }
+    // Get the ancestor loops from inner to outer, up to the parent scope
+    std::vector<const tir::ForNode*> loops;
+    for (auto iter = dfs_path_.rbegin(); iter != dfs_path_.rend(); ++iter) {
+      const tir::StmtNode* stmt = *iter;
+      if (stmt->IsInstance<tir::ForNode>()) {
+        loops.push_back(static_cast<const tir::ForNode*>(stmt));
+      }
+    }
+    FeatureSet& feature = per_block_feature_[realize];
+    feature.block_realize = realize;
+    // Group 1: Computation related features
+    // Group 2: Buffer access related features
+    // Group 3: Arithmetic intensity related features
+    // Group 4: Allocation related features
+    // Group 5: Outer scope related features
+  }
+
+  void VisitStmt_(const tir::ForNode* loop) override {
+    int64_t auto_unroll = -1;
+    int64_t extent = *GetLoopIntExtent(loop);
+    if (extent == -1) {
+      extent = 1;
+    }
+    // Handling annotated loops
+    std::vector<const tir::ForNode*>* ref_loops = nullptr;
+    if (!loop->annotations.empty()) {
+      for (const auto& ann : loop->annotations) {
+        if (ann.first == "pragma_auto_unroll_max_step") {
+          auto_unroll = Downcast<Integer>(ann.second)->value;
+        }
+      }
+    }
+
+    if (loop->kind == tir::ForKind::kParallel) {
+      ref_loops = &parallel_;
+    } else if (loop->kind == tir::ForKind::kVectorized) {
+      ref_loops = &vectorize_;
+    } else if (loop->kind == tir::ForKind::kUnrolled) {
+      ref_loops = &unroll_;
+    } else if (loop->kind == tir::ForKind::kThreadBinding) {
+      ICHECK(loop->thread_binding.defined());
+      std::string thread_tag = loop->thread_binding.value()->thread_tag;
+      if (thread_tag == "blockIdx.x") {
+        ref_loops = &blockIdx_x_;
+      } else if (thread_tag == "blockIdx.y") {
+        ref_loops = &blockIdx_y_;
+      } else if (thread_tag == "blockIdx.z") {
+        ref_loops = &blockIdx_z_;
+      } else if (thread_tag == "threadIdx.x") {
+        ref_loops = &threadIdx_x_;
+      } else if (thread_tag == "threadIdx.y") {
+        ref_loops = &threadIdx_y_;
+      } else if (thread_tag == "threadIdx.z") {
+        ref_loops = &threadIdx_z_;
+      } else if (thread_tag == "vthread") {
+        ref_loops = &vthread_;
+      }
+    }
+
+    if (ref_loops != nullptr) {
+      ref_loops->push_back(loop);
+    }
+    if (auto_unroll != -1) {
+      auto_unroll_.push_back(auto_unroll);
+    }
+    outer_loop_prod_ *= extent;
+    if (extent != 1 || ref_loops != nullptr) {
+      dfs_path_.push_back(loop);
+      loops_.push_back(loop);
+      analyzer_.Bind(loop->loop_var, loop->min);
+    }
+    tir::StmtExprVisitor::VisitStmt_(loop);
+    if (extent != 1 || ref_loops != nullptr) {
+      loops_.pop_back();
+      dfs_path_.pop_back();
+    }
+    outer_loop_prod_ /= extent;
+    if (auto_unroll != -1) {
+      auto_unroll_.pop_back();
+    }
+    if (ref_loops != nullptr) {
+      ref_loops->pop_back();
+    }
+  }
+
+  void VisitStmt_(const tir::BufferStoreNode* store) override {}
+
+ private:
+  static int64_t ProdLoopExtent(const std::vector<const tir::ForNode*>& loops) {
+    int64_t prod = 1;
+    for (const tir::ForNode* loop : loops) {
+      int64_t extent = *GetLoopIntExtent(loop);
+      if (extent != -1) {
+        prod *= extent;
+      }
+    }
+    return prod;
+  }
+
+  static int64_t FirstLoopExtent(const std::vector<const tir::ForNode*>& loops) {
+    if (loops.empty()) {
+      return 1;
+    }
+    int64_t extent = *GetLoopIntExtent(loops[0]);
+    if (extent == -1) {
+      return 1;
+    }
+    return extent;
   }
 
  private:
