@@ -88,6 +88,64 @@ struct FeatureSet {
     StmtExprVisitor::VisitExpr_(op);                       \
   }
 
+class MathOpCounter : public tir::StmtExprVisitor {};
+
+#undef TVM_FEATURE_BINARY
+#undef TVM_FEATURE_SIMPLE
+#undef TVM_FEATURE_INC_CNT
+
+class CoefficientExtractor : public tir::StmtExprVisitor {
+ public:
+  explicit CoefficientExtractor(const tir::Var& var)
+      : var(var), stride(0), visited_var(false), visited_add(false), visited_mul(false) {}
+
+  void VisitExpr_(const tir::MulNode* node) override {
+    StmtExprVisitor::VisitExpr_(node);
+    if (visited_var) {
+      if (!visited_add) {
+        if (const auto* a = node->a.as<IntImmNode>()) {
+          visited_mul = true;
+          stride = a->value;
+        } else if (const auto* b = node->b.as<IntImmNode>()) {
+          visited_mul = true;
+          stride = b->value;
+        }
+      }
+    }
+  }
+
+  void VisitExpr_(const tir::AddNode* node) override {
+    StmtExprVisitor::VisitExpr_(node);
+    if (visited_var) {
+      if (!visited_mul) {
+        visited_add = true;
+        stride = 1;
+      }
+    }
+  }
+
+  void VisitExpr_(const tir::VarNode* node) override {
+    if (node == var.get()) {
+      visited_var = true;
+      stride = 2;  // This is a magic default stride in case our approximation strategy fails
+    }
+  }
+
+  static int64_t Extract(const PrimExpr& expr, const tir::Var& var) {
+    CoefficientExtractor extractor(var);
+    extractor.VisitExpr(expr);
+    return (extractor.visited_var && !extractor.visited_mul && !extractor.visited_add)
+               ? 1
+               : (extractor.visited_var ? extractor.stride : 0);
+  }
+
+  const tir::Var& var;
+  int64_t stride;
+  bool visited_var;
+  bool visited_add;
+  bool visited_mul;
+};
+
 runtime::NDArray PerBlockFeature(const tir::Schedule& sch, int max_num_buffer_access_features) {}
 
 Array<String> PerBlockFeatureNames(int max_num_buffer_access_features) {}
