@@ -108,6 +108,11 @@ class FeatureExtractor : public runtime::ObjectRef {
                                                   int arith_intensity_curve_num_samples = 10,
                                                   int cache_line_bytes = 64,
                                                   bool extract_workload = false);
+
+  TVM_DLL static FeatureExtractor PerBlockFeature(int buffers_per_block = 5,
+                                                  int arith_intensity_curve_num_samples = 10,
+                                                  int cache_line_bytes = 64,
+                                                  bool extract_workload = false);
   /*!
    * \brief Create a feature extractor with customized methods on the python-side.
    * \param f_extract_from The packed function of `ExtractFrom`.
