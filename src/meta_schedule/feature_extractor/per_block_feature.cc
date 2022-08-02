@@ -134,11 +134,8 @@ struct Feature {
 
   static constexpr int64_t kCount = ArithOps::kCount + ForKindFeature::kCount * 3 + 8;
 
-  explicit Feature(const BufferStoreNode* store, const LoopNest& loop_nest, bool is_gpu)
-      : arith_ops(store, loop_nest.prod),
-        vectorize(loop_nest.vectorize),
-        unroll(loop_nest.unroll),
-        parallel(loop_nest.parallel) {
+  explicit Feature(const BlockRealizeNode* block_realize, const LoopNest& loop_nest, bool is_gpu)
+      : vectorize(loop_nest.vectorize), unroll(loop_nest.unroll), parallel(loop_nest.parallel) {
     if (is_gpu) {
       this->is_gpu = true;
       this->blockIdx_x_len = utils::FirstLoopExtent(loop_nest.blockIdx_x, 1);
@@ -259,16 +256,16 @@ Feature::ForKindFeature::ForKindFeature(const ForVec& loops) {
 
 /*! \brief The feature extracted */
 struct Feature {
-  const BufferNode* buffer = nullptr;
-  int buffer_order = -1;
+  const BlockRealizeNode* block_realize = nullptr;
+  // int buffer_order = -1;
   // TODO: add feature group 1-5
-  // std::unique_ptr<group1::Feature> group1 = nullptr;
+  std::unique_ptr<group1::Feature> group1 = nullptr;
   // std::unique_ptr<group2::Feature> group2 = nullptr;
   // std::unique_ptr<group3::Feature> group3 = nullptr;
   // std::unique_ptr<group4::Feature> group4 = nullptr;
   // std::unique_ptr<group5::Feature> group5 = nullptr;
 
-  bool operator<(const Feature& other) const { return buffer_order < other.buffer_order; }
+  // bool operator<(const Feature& other) const { return buffer_order < other.buffer_order; }
 };
 
 /*! \brief The main feature extractor */
@@ -288,10 +285,10 @@ class PerBlockFeatureCollector : private StmtVisitor {
       }
     }
     std::vector<Feature> result;
-    result.reserve(collector.buffer_features_.size());
-    for (auto& it : collector.buffer_features_) {
+    result.reserve(collector.block_features_.size());
+    for (auto& it : collector.block_features_) {
       Feature& feature = it.second;
-      if (feature.buffer != nullptr) {
+      if (feature.block_realize != nullptr) {
         // TODO: add feature group 1-5
         // ICHECK(feature.group1);
         // ICHECK(feature.group2);
@@ -303,7 +300,7 @@ class PerBlockFeatureCollector : private StmtVisitor {
         result.push_back(std::move(feature));
       }
     }
-    std::sort(result.begin(), result.end());
+    // std::sort(result.begin(), result.end());
     return result;
   }
 
@@ -314,6 +311,31 @@ class PerBlockFeatureCollector : private StmtVisitor {
         cache_line_bytes_(cache_line_bytes),
         arith_intensity_curve_num_samples_(arith_intensity_curve_num_samples) {}
 
+  void VisitStmt_(const BlockRealizeNode* block) final {
+    if (!scopes_.empty()) {
+      ordered_blocks_.push_back(block);
+    }
+    scopes_.push_back(block);
+    dfs_path_.push_back(block);
+    StmtVisitor::VisitStmt_(block);
+    dfs_path_.pop_back();
+    scopes_.pop_back();
+    if (scopes_.empty()) {
+      return;
+    }
+    // Get the ancestor loops from inner to outer, up to the parent scope
+    ForVec loops;
+    for (auto iter = dfs_path_.rbegin(); iter != dfs_path_.rend(); ++iter) {
+      const StmtNode* stmt = *iter;
+      if (stmt->IsInstance<ForNode>()) {
+        loops.push_back(static_cast<const ForNode*>(stmt));
+      }
+    }
+    Feature& feature = block_features_[block];
+    feature.block_realize = block;
+    // TODO: add groups 1-5
+  }
+
   void VisitStmt_(const ForNode* loop) final {
     int64_t auto_unroll;
     ForVec* for_vec = loop_nest_.Push(loop, &auto_unroll);
@@ -321,18 +343,19 @@ class PerBlockFeatureCollector : private StmtVisitor {
     loop_nest_.Pop(loop, for_vec, auto_unroll);
   }
 
-  void VisitStmt_(const BlockRealizeNode* realize) final {
-    // TODO
-  }
+  void VisitStmt_(const BufferStoreNode* store) final {}
 
   bool is_gpu_;
   int64_t cache_line_bytes_;
   int64_t arith_intensity_curve_num_samples_;
   arith::Analyzer analyzer_;
+  BlockVec scopes_;
+  BlockVec ordered_blocks_;
+  PathVec dfs_path_;
   LoopNest loop_nest_ = {};
   IntVec for_touched_bytes_ = {};
   ForBufferMap<IntVec> buffer_touched_under_loop_ = {};
-  std::unordered_map<const BufferNode*, Feature> buffer_features_ = {};
+  std::unordered_map<const BlockRealizeNode*, Feature> block_features_ = {};
 };
 
 }  // namespace per_block_feature
@@ -370,7 +393,7 @@ class PerBlockFeatureNode : public FeatureExtractorNode {
       std::vector<double>& result = (*results)[i];
       result.reserve(feature_vector_length);
       // TODO: add feature group 1-5
-      // feature.group1->Export(&result);
+      feature.group1->Export(&result);
       // feature.group2->Export(&result, this->buffers_per_block);
       // feature.group3->Export(&result);
       // feature.group4->Export(&result, feature.group5->outer_prod);

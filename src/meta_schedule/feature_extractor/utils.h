@@ -37,6 +37,10 @@ using MultiIndex = std::vector<PrimExpr>;
 using IntVec = std::vector<int64_t>;
 /*! \brief Vector of for loops */
 using ForVec = std::vector<const ForNode*>;
+/*! \brief Vector of blocks */
+using BlockVec = std::vector<const BlockRealizeNode*>;
+/*! \brief Vector of DFS paths */
+using PathVec = std::vector<const StmtNode*>;
 
 /*!
  * \brief An unordered_map for (for, buffer) => V
