@@ -333,7 +333,11 @@ class PerBlockFeatureCollector : private StmtVisitor {
     }
     Feature& feature = block_features_[block];
     feature.block_realize = block;
-    // TODO: add groups 1-5
+    if (!scopes_.empty()) {
+      AddArithOpsToScope(&feature.group1->arith_ops);
+    }
+    feature.group1 = std::make_unique<group1::Feature>(block, loop_nest_, is_gpu_);
+    // TODO: add groups 2-5
   }
 
   void VisitStmt_(const ForNode* loop) final {
@@ -343,11 +347,55 @@ class PerBlockFeatureCollector : private StmtVisitor {
     loop_nest_.Pop(loop, for_vec, auto_unroll);
   }
 
-  void VisitStmt_(const BufferStoreNode* store) final {}
+  void VisitStmt_(const BufferStoreNode* store) final {
+    ICHECK(!scopes_.empty());
+    group1::Feature::ArithOps arith_ops = group1::Feature::ArithOps(store, loop_nest_.prod);
+    AddArithOpsToScope(&arith_ops);
+  }
+
+  void AddArithOpsToScope(group1::Feature::ArithOps* arith_ops) {
+    const BlockRealizeNode* scope = scopes_.back();
+    // The product of the loops up to the parent
+    int64_t prod_loop_extent = 1;
+    for (auto iter = dfs_path_.rbegin(); iter != dfs_path_.rend(); ++iter) {
+      const tir::StmtNode* stmt = *iter;
+      if (stmt == scope) {
+        break;
+      }
+      ICHECK(stmt->IsInstance<tir::ForNode>());
+      const int64_t* extent = GetLoopIntExtent(static_cast<const tir::ForNode*>(stmt));
+      if (*extent >= 1) {
+        prod_loop_extent *= *extent;
+      }
+    }
+    // Add the arith_ops to the parent
+    group1::Feature::ArithOps& parent_arith_ops = block_features_[scope].group1->arith_ops;
+#define TVM_FEATURE_MATH_OP_ADD(Name)                         \
+  parent_arith_ops.Name = arith_ops->Name * prod_loop_extent; \
+  arith_ops->Name *= outer_loop_prod_
+    TVM_FEATURE_MATH_OP_ADD(float_mad);
+    TVM_FEATURE_MATH_OP_ADD(float_add_sub);
+    TVM_FEATURE_MATH_OP_ADD(float_mul);
+    TVM_FEATURE_MATH_OP_ADD(float_div_mod);
+    TVM_FEATURE_MATH_OP_ADD(float_cmp);
+    TVM_FEATURE_MATH_OP_ADD(float_math_func);
+    TVM_FEATURE_MATH_OP_ADD(float_other_func);
+    TVM_FEATURE_MATH_OP_ADD(int_mad);
+    TVM_FEATURE_MATH_OP_ADD(int_add_sub);
+    TVM_FEATURE_MATH_OP_ADD(int_mul);
+    TVM_FEATURE_MATH_OP_ADD(int_div_mod);
+    TVM_FEATURE_MATH_OP_ADD(int_cmp);
+    TVM_FEATURE_MATH_OP_ADD(int_math_func);
+    TVM_FEATURE_MATH_OP_ADD(int_other_func);
+    TVM_FEATURE_MATH_OP_ADD(bool_op);
+    TVM_FEATURE_MATH_OP_ADD(select_op);
+#undef TVM_FEATURE_MATH_OP_ADD
+  }
 
   bool is_gpu_;
   int64_t cache_line_bytes_;
   int64_t arith_intensity_curve_num_samples_;
+  int64_t outer_loop_prod_ = 1;
   arith::Analyzer analyzer_;
   BlockVec scopes_;
   BlockVec ordered_blocks_;
