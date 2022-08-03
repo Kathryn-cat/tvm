@@ -254,6 +254,79 @@ Feature::ForKindFeature::ForKindFeature(const ForVec& loops) {
 
 }  // namespace group1
 
+namespace group3 {
+
+/*! \brief Group 3 feature */
+struct Feature {
+  /*!
+   * \brief See the wiki page [1] for details
+   *
+   * [1] https://en.wikipedia.org/wiki/Roofline_model
+   */
+  std::vector<double> arith_intensity_curve;
+
+  void Export(std::vector<double>* v) const {
+    v->insert(v->end(), arith_intensity_curve.begin(), arith_intensity_curve.end());
+  }
+
+  explicit Feature(int n_samples, const LoopNest& loop_nest, const IntVec& for_touched_bytes,
+                   const group1::Feature::ArithOps& arith_ops)
+      : arith_intensity_curve(n_samples, 0.0) {
+    const std::vector<const ForNode*>& loops = loop_nest.loops;
+    ICHECK_EQ(loops.size(), for_touched_bytes.size());
+    int n_loops = loops.size();
+    // Calculate `memory_bytes`
+    std::vector<double> memory_bytes;
+    memory_bytes.resize(n_loops);
+    for (int i = 0; i < n_loops; ++i) {
+      memory_bytes[n_loops - 1 - i] = std::log2(for_touched_bytes[i]);
+    }
+    // Calculate `compute_ops` and `cur_compute_ops`
+    std::vector<double> compute_ops;
+    double total_compute_ops = arith_ops.float_mad + arith_ops.float_add_sub + arith_ops.float_mul +
+                               arith_ops.float_div_mod + arith_ops.float_cmp +
+                               arith_ops.float_math_func + arith_ops.float_other_func;
+    total_compute_ops /= loop_nest.prod;
+    for (int i = n_loops - 1; i >= 0; --i) {
+      if (const int64_t* extent = GetLoopIntExtent(loops[i])) {
+        total_compute_ops *= *extent;
+      }
+      compute_ops.push_back(std::log2(total_compute_ops));
+    }
+    // Fill the feature set
+    if (total_compute_ops <= 0 || compute_ops.empty()) {
+      for (int i = 0; i < n_samples; ++i) {
+        arith_intensity_curve[i] = 0.0;
+      }
+      return;
+    }
+    total_compute_ops = compute_ops.back();  // i.e. total_compute_ops = log2(total_compute_ops)
+    int p = 0;
+    for (int i = 0; i < n_samples; ++i) {
+      double& result = arith_intensity_curve[i];
+      double cur_compute_ops = static_cast<double>(i + 1) / n_samples * total_compute_ops;
+      // Find the first `p` that `compute[p] >= total * (i + 1) / N`
+      for (; p < n_loops; ++p) {
+        if (compute_ops[p] >= cur_compute_ops - 1e-4) {
+          break;
+        }
+      }
+      CHECK_LT(p, n_loops);
+      if (p == 0) {
+        result = compute_ops[p] / memory_bytes[p];
+      } else {
+        double base = compute_ops[p - 1] / memory_bytes[p - 1];
+        double slope =
+            (compute_ops[p] / memory_bytes[p] - compute_ops[p - 1] / memory_bytes[p - 1]) /
+            (compute_ops[p] - compute_ops[p - 1]);
+        result = base + slope * (cur_compute_ops - compute_ops[p - 1]);
+      }
+    }
+  }
+};
+
+}  // namespace group3
+
 /*! \brief The feature extracted */
 struct Feature {
   const BlockRealizeNode* block_realize = nullptr;
@@ -261,7 +334,7 @@ struct Feature {
   // TODO: add feature group 1-5
   std::unique_ptr<group1::Feature> group1 = nullptr;
   // std::unique_ptr<group2::Feature> group2 = nullptr;
-  // std::unique_ptr<group3::Feature> group3 = nullptr;
+  std::unique_ptr<group3::Feature> group3 = nullptr;
   // std::unique_ptr<group4::Feature> group4 = nullptr;
   // std::unique_ptr<group5::Feature> group5 = nullptr;
 
@@ -337,7 +410,10 @@ class PerBlockFeatureCollector : private StmtVisitor {
       AddArithOpsToScope(&feature.group1->arith_ops);
     }
     feature.group1 = std::make_unique<group1::Feature>(block, loop_nest_, is_gpu_);
-    // TODO: add groups 2-5
+    feature.group3 =
+        std::make_unique<group3::Feature>(arith_intensity_curve_num_samples_, loop_nest_,
+                                          for_touched_bytes_, feature.group1->arith_ops);
+    // TODO: add groups 2,4,5
   }
 
   void VisitStmt_(const ForNode* loop) final {
