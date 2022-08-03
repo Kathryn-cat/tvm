@@ -254,6 +254,418 @@ Feature::ForKindFeature::ForKindFeature(const ForVec& loops) {
 
 }  // namespace group1
 
+namespace group2 {
+
+/*! \brief Group 2 features */
+struct Feature {
+  enum class AccessType : int {
+    /*! The buffer is read but not written */
+    kRead = 0,
+    /*! The buffer is written but not read */
+    kWrite = 1,
+    /*! The buffer is both read and written */
+    kReadWrite = 2,
+    /*! Unknown type */
+    kUnknownRW = 3,
+  };
+  enum class ReuseType : int {
+    /*! Buffer reuse because accessed on each iteration of a loop */
+    kLoopMultipleRead = 0,
+    /*! Buffer reuse because it is serially accessed */
+    kSerialMultipleReadWrite = 1,
+    /*! No buffer reuse */
+    kNoReuse = 2,
+  };
+
+  struct SubFeature {
+    /*! \brief The buffer this feature is for */
+    const BufferNode* buffer = nullptr;
+    /*! \brief The access type of the buffer */
+    AccessType access_type = AccessType::kUnknownRW;
+    /*! \brief A list of multi-dimensional indices used to access the buffer */
+    std::vector<MultiIndex> multi_indices = {};
+    // Access information
+    /*! \brief loop_accessed_numel[i][...] means the number of elements accessed by loops[i] */
+    std::vector<std::unordered_map<const BufferNode*, int64_t>> loop_accessed_numel = {};
+    /*! \brief The shape of the data access */
+    IntVec access_shape;
+    /*! \brief The bytes that are continuously accessed */
+    int64_t num_continuous_bytes = 1;
+    // Stride information
+    /*! \brief The min stride of the access */
+    int64_t min_stride = 0;
+    /*! \brief The innermost stride */
+    int64_t innermost_stride = 0;
+    /*! \brief The product of the non-strided loops */
+    int64_t prod_non_strided_loop_extent = 0;
+    // Reuse information
+    /*! The type of data reuse */
+    ReuseType reuse_type = ReuseType::kNoReuse;
+    /*! The reuse distance in terms of number of iterations */
+    double reuse_dis_iter = 0.0;
+    /*! The reuse distance in terms of bytes */
+    double reuse_dis_bytes = 0.0;
+    /*! The reuse count */
+    int64_t reuse_ct = 0;
+    // Features
+    /*! The touched memory in bytes */
+    double bytes;
+    /*! The touched unique memory in bytes */
+    double unique_bytes;
+    /*! The number of touched cache lines */
+    double lines;
+    /*! The number touched unique cache lines */
+    double unique_lines;
+    /*! bytes / reuse_ct */
+    double bytes_d_reuse_ct;
+    /*! unique_bytes / reuse_ct */
+    double unique_bytes_d_reuse_ct;
+    /*! lines / reuse_ct */
+    double lines_d_reuse_ct;
+    /*! unique_lines / reuse_ct */
+    double unique_lines_d_reuse_ct;
+    /*! The stride in access */
+    double stride;
+
+    static constexpr int64_t kCount = 18;
+
+    void Export(std::vector<double>* v) const {
+      double vs[] = {
+          static_cast<double>(static_cast<int>(access_type) == 0),
+          static_cast<double>(static_cast<int>(access_type) == 1),
+          static_cast<double>(static_cast<int>(access_type) == 2),
+          // FeatureSet::BufferAccess::AccessType::kUnknownRW is ignored
+          slog(bytes),
+          slog(unique_bytes),
+          slog(lines),
+          slog(unique_lines),
+          static_cast<double>(static_cast<int>(reuse_type) == 0),
+          static_cast<double>(static_cast<int>(reuse_type) == 1),
+          static_cast<double>(static_cast<int>(reuse_type) == 2),
+          slog(reuse_dis_iter),
+          slog(reuse_dis_bytes),
+          slog(reuse_ct),
+          slog(bytes_d_reuse_ct),
+          slog(unique_bytes_d_reuse_ct),
+          slog(lines_d_reuse_ct),
+          slog(unique_lines_d_reuse_ct),
+          slog(stride),
+      };
+      v->insert(v->end(), std::begin(vs), std::end(vs));
+    }
+
+    static void Pad(std::vector<double>* v) { v->insert(v->end(), 18, 0.0); }
+
+    void SetStride(const LoopNest& loop_nest, arith::Analyzer* analyzer);
+
+    void SetReuse(const LoopNest& loop_nest,     //
+                  int64_t top_loop_touch_bytes,  //
+                  const ForBufferMap<IntVec>& buffer_touched_under_loop);
+
+    void SetFeature(const LoopNest& loop_nest, int64_t cache_line_bytes);
+
+    explicit SubFeature(const BufferNode* buffer, AccessType access_type,
+                        std::vector<MultiIndex> multi_indices, int n_loops)
+        : buffer(buffer),
+          access_type(access_type),
+          multi_indices(multi_indices),
+          loop_accessed_numel(n_loops) {}
+  };
+
+  void Export(std::vector<double>* v, int buffers_per_store) const {
+    int n = sub_features.size();
+    for (int i = 0; i < buffers_per_store; ++i) {
+      if (i < n) {
+        sub_features[i].Export(v);
+      } else {
+        SubFeature::Pad(v);
+      }
+    }
+  }
+
+  explicit Feature(const BufferStoreNode* store, const LoopNest& loop_nest,
+                   int64_t cache_line_bytes, IntVec* for_touched_bytes,
+                   ForBufferMap<IntVec>* buffer_touched_under_loop, arith::Analyzer* analyzer);
+
+  void Init(const BufferStoreNode* store, int n_loops);
+
+  void SetRegion(const LoopNest& loop_nest,                        //
+                 IntVec* for_touched_bytes,                        //
+                 ForBufferMap<IntVec>* buffer_touched_under_loop,  //
+                 arith::Analyzer* analyzer);
+
+  std::vector<SubFeature> sub_features;
+};
+
+void Feature::Init(const BufferStoreNode* store, int n_loops) {
+  struct Info {
+    AccessType access_type = AccessType::kUnknownRW;
+    std::vector<MultiIndex> multi_indices;
+  };
+  std::unordered_map<const BufferNode*, Info> buffer_info;
+  {
+    Info& info = buffer_info[store->buffer.get()];
+    info.access_type = AccessType::kWrite;
+    info.multi_indices.push_back({store->indices.begin(), store->indices.end()});
+  }
+  PostOrderVisit(store->value, [&buffer_info](const ObjectRef& obj) -> void {
+    if (const BufferLoadNode* load = obj.as<BufferLoadNode>()) {
+      const BufferNode* buffer = load->buffer.get();
+      Info& info = buffer_info[buffer];
+      switch (info.access_type) {
+        case AccessType::kRead:
+          break;
+        case AccessType::kWrite:
+          info.access_type = AccessType::kReadWrite;
+          break;
+        case AccessType::kReadWrite:
+          break;
+        case AccessType::kUnknownRW:
+        default:
+          info.access_type = AccessType::kRead;
+          break;
+      }
+      if (info.access_type != AccessType::kReadWrite) {
+        info.multi_indices.push_back({load->indices.begin(), load->indices.end()});
+      }
+    }
+  });
+  this->sub_features.reserve(buffer_info.size());
+  for (const auto& kv : buffer_info) {
+    this->sub_features.emplace_back(kv.first, kv.second.access_type,
+                                    std::move(kv.second.multi_indices), n_loops);
+  }
+}
+
+void Feature::SetRegion(const LoopNest& loop_nest, IntVec* for_touched_bytes,
+                        ForBufferMap<IntVec>* buffer_touched_under_loop,
+                        arith::Analyzer* analyzer) {
+  int n_loops = loop_nest.loops.size();
+  const std::vector<const ForNode*>& loops = loop_nest.loops;
+  // Step 1. Initialize and bind all the loop variables to a constant
+  *for_touched_bytes = IntVec(n_loops, 0);
+  for (int i = 0; i < n_loops; ++i) {
+    const ForNode* loop = loops[i];
+    analyzer->Bind(loop->loop_var, loop->min, /*allow_override=*/true);
+  }
+  // Step 2. Corner case: no loops
+  if (n_loops == 0) {
+    // In this case, the `access_shape` is not calculated
+    for (SubFeature& feature : sub_features) {
+      feature.access_shape = IntVec(feature.buffer->shape.size(), 1);
+    }
+    return;
+  }
+  // Step 3. Gradually bind the loops from inner to outer,
+  // calculate the area the loops touch on each buffer
+  for (int i = n_loops - 1; i >= 0; --i) {
+    const ForNode* loop = loops[i];
+    analyzer->Bind(loop->loop_var, Range::FromMinExtent(loop->min, loop->extent),
+                   /*allow_override=*/true);
+    int64_t& touched_bytes = (*for_touched_bytes)[i] = 0;
+    for (SubFeature& feature : sub_features) {
+      const BufferNode* buffer = feature.buffer;
+      // Note: `feature.access_shape` for `i == 0` is the only one preserved,
+      // while others are discarded
+      int64_t numel;
+      feature.access_shape = utils::RelaxAndUnion(feature.multi_indices, &numel, analyzer);
+      feature.loop_accessed_numel[i][buffer] = numel;
+      touched_bytes += numel * buffer->dtype.bytes();
+      (*buffer_touched_under_loop)[loop][buffer].push_back(numel);
+    }
+  }
+}
+
+void Feature::SubFeature::SetStride(const LoopNest& loop_nest, arith::Analyzer* analyzer) {
+  int n_loops = loop_nest.loops.size();
+  const std::vector<const ForNode*>& loops = loop_nest.loops;
+  // For each buffer, we find the loop stride on it
+  const BufferNode* buffer = this->buffer;
+  int ndim = this->buffer->shape.size();
+  IntVec buffer_shape = utils::GetBufferShape(GetRef<Buffer>(buffer), analyzer);
+  // Calculate the buffer's stride from its shape
+  IntVec buffer_stride(ndim);
+  if (ndim >= 1) {
+    buffer_stride[ndim - 1] = 1;
+    for (int i = ndim - 2; i >= 0; --i) {
+      buffer_stride[i] = buffer_stride[i + 1] * buffer_shape[i + 1];
+    }
+  }
+  // Calculate `num_continuous_bytes`
+  {
+    int64_t& num_continuous_bytes = this->num_continuous_bytes = 1;
+    const IntVec& access_shape = this->access_shape;
+    ICHECK_EQ(access_shape.size(), buffer_shape.size());
+    for (int i = ndim - 1; i >= 0; --i) {
+      if (access_shape[i] == buffer_shape[i]) {
+        num_continuous_bytes = buffer_shape[i] * buffer->dtype.bytes();
+        break;
+      }
+    }
+  }
+  // Enumerate loops from inner to outer
+  int i = 0;
+  // Calculate this->min_stride
+  int64_t& stride = this->min_stride = 0;
+  for (i = n_loops - 1; i >= 0; --i) {
+    stride = utils::GetVarStride(this->multi_indices, buffer_stride, loops[i]->loop_var);
+    if (stride != 0) {
+      break;
+    }
+  }
+  // Calculate this->innermost_stride
+  this->innermost_stride = (i == n_loops - 1) ? stride : 0;
+  // Calculate this->prod
+  int64_t& prod = this->prod_non_strided_loop_extent = 1;
+  for (int j = n_loops - 1; j > i; --j) {
+    if (const int64_t* extent = GetLoopIntExtent(loops[n_loops - 1])) {
+      prod *= *extent;
+    }
+  }
+}
+
+void Feature::SubFeature::SetReuse(const LoopNest& loop_nest, int64_t top_loop_touch_bytes,
+                                   const ForBufferMap<IntVec>& buffer_touched_under_loop) {
+  const BufferNode* buffer = this->buffer;
+  // Step 0. Collect all `Var`s that appears in the buffer region
+  std::unordered_set<const VarNode*> region_vars;
+  for (const MultiIndex& multi_index : this->multi_indices) {
+    for (const PrimExpr& index : multi_index) {
+      PostOrderVisit(index, [&region_vars](const ObjectRef& obj) -> void {
+        if (const auto* var = obj.as<VarNode>()) {
+          region_vars.insert(var);
+        }
+      });
+    }
+  }
+  // Default case: no reuse
+  ReuseType& reuse_type = this->reuse_type = ReuseType::kNoReuse;
+  double& reuse_dis_iter = this->reuse_dis_iter = 0;
+  double& reuse_dis_bytes = this->reuse_dis_bytes = 0;
+  int64_t& reuse_ct = this->reuse_ct = 0;
+
+  // Step 3.2. Enumerate loops from inner to outer, find the first loop with reuse
+  int n_loops = loop_nest.loops.size();
+  const std::vector<const ForNode*>& loops = loop_nest.loops;
+  for (int i = n_loops - 1; i >= 0; --i) {
+    const ForNode* loop = loops[i];
+    // Case 1. Find an invariant loop, i.e. reuse with kLoopMultipleRead
+    if (!region_vars.count(loop->loop_var.get())) {
+      reuse_type = ReuseType::kLoopMultipleRead;
+      if (const int64_t* extent = GetLoopIntExtent(loop)) {
+        reuse_ct = *extent;
+      } else {
+        reuse_ct = 1;
+      }
+      reuse_dis_iter = 1;
+      for (int j = n_loops - 1; j > i; --j) {
+        if (const int64_t* extent = GetLoopIntExtent(loops[j])) {
+          reuse_dis_iter *= *extent;
+        }
+      }
+      reuse_dis_bytes = 0.0;
+      if (i == n_loops - 1) {
+        reuse_dis_bytes = top_loop_touch_bytes;
+      } else {
+        for (const auto& iter : buffer_touched_under_loop.at(loops[i + 1])) {
+          const BufferNode* buffer = iter.first;
+          const IntVec& numels = iter.second;
+          int64_t numel = std::accumulate(numels.begin(), numels.end(), int64_t(0));
+          reuse_dis_bytes += numel * buffer->dtype.bytes();
+        }
+      }
+      break;
+    }
+    // Case 2. Find serial reuse, i.e. reuse with kSerialMultipleReadWrite
+    const IntVec& touched = buffer_touched_under_loop.at(loop).at(buffer);
+    if (touched.size() >= 2) {
+      int64_t extent = 1;
+      if (const int64_t* ext = GetLoopIntExtent(loop)) {
+        extent = *ext;
+      }
+      reuse_type = ReuseType::kSerialMultipleReadWrite;
+      reuse_ct = touched.size() - 1;
+      reuse_dis_iter = *std::min_element(touched.begin(), touched.end());
+      reuse_dis_bytes = 0.0;
+      for (const auto& iter : buffer_touched_under_loop.at(loop)) {
+        const BufferNode* buffer = iter.first;
+        const IntVec& numels = iter.second;
+        int64_t numel = std::accumulate(numels.begin(), numels.end(), int64_t(0));
+        reuse_dis_bytes += numel * buffer->dtype.bytes();
+      }
+      reuse_dis_iter /= extent;
+      reuse_dis_bytes /= extent;
+      break;
+    }
+  }
+}
+
+void Feature::SubFeature::SetFeature(const LoopNest& loop_nest, int64_t cache_line_bytes) {
+  int64_t dtype_bytes = this->buffer->dtype.bytes();
+  this->stride = this->innermost_stride;
+  this->bytes = dtype_bytes * loop_nest.prod;
+  if (loop_nest.loops.empty()) {
+    this->unique_bytes = 1;
+    this->lines = 1;
+    this->unique_lines = 1;
+  } else {
+    this->unique_bytes = this->loop_accessed_numel.front().at(buffer) * dtype_bytes;
+    this->lines = static_cast<double>(loop_nest.prod) / this->prod_non_strided_loop_extent *
+                  std::min(1.0, 1.0 * this->min_stride * dtype_bytes / cache_line_bytes);
+    this->lines = std::max(1.0, this->lines);
+    this->unique_lines = static_cast<double>(this->unique_bytes) /
+                         std::min(cache_line_bytes, this->num_continuous_bytes);
+    this->unique_lines = std::max(1.0, this->unique_lines);
+  }
+  double proxy_reuse_ct = this->reuse_ct > 0 ? this->reuse_ct : 0.5;
+  this->bytes_d_reuse_ct = this->bytes / proxy_reuse_ct;
+  this->unique_bytes_d_reuse_ct = this->unique_bytes / proxy_reuse_ct;
+  this->lines_d_reuse_ct = this->lines / proxy_reuse_ct;
+  this->unique_lines_d_reuse_ct = this->unique_lines / proxy_reuse_ct;
+}
+
+Feature::Feature(const BufferStoreNode* store, const LoopNest& loop_nest, int64_t cache_line_bytes,
+                 IntVec* for_touched_bytes, ForBufferMap<IntVec>* buffer_touched_under_loop,
+                 arith::Analyzer* analyzer) {
+  int n_loops = loop_nest.loops.size();
+  // Step 0. Initialize data structures
+  this->Init(store, n_loops);
+  // Step 1. Calculate region-related feature
+  this->SetRegion(loop_nest, for_touched_bytes, buffer_touched_under_loop, analyzer);
+  // Step 2. Calculate stride-related feature
+  for (auto& feature : sub_features) {
+    feature.SetStride(loop_nest, analyzer);
+  }
+  // Step 3. Calculate reuse-related feature
+  int64_t top_loop_touch_bytes = 0.0;
+  if (n_loops > 0) {
+    for (const SubFeature& feature : sub_features) {
+      int64_t bytes = feature.buffer->dtype.bytes();
+      int64_t n_buffer = feature.loop_accessed_numel[0].size();
+      top_loop_touch_bytes += bytes * n_buffer;
+    }
+  }
+  for (auto& feature : sub_features) {
+    feature.SetReuse(loop_nest, top_loop_touch_bytes, *buffer_touched_under_loop);
+  }
+  // Step 4. Calculate rest of the features
+  for (auto& feature : sub_features) {
+    feature.SetFeature(loop_nest, cache_line_bytes);
+  }
+  // Step 5. Sort the features
+  std::sort(sub_features.begin(), sub_features.end(), [](const SubFeature& a, const SubFeature& b) {
+    if (a.lines != b.lines) {
+      return a.lines > b.lines;
+    }
+    if (a.bytes != b.bytes) {
+      return a.bytes > b.bytes;
+    }
+    return a.buffer->name < b.buffer->name;
+  });
+}
+
+}  // namespace group2
+
 namespace group3 {
 
 /*! \brief Group 3 feature */
