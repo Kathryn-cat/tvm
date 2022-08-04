@@ -383,11 +383,11 @@ struct Feature {
     }
   }
 
-  explicit Feature(const BufferStoreNode* store, const LoopNest& loop_nest,
+  explicit Feature(const BlockRealizeNode* realize, const LoopNest& loop_nest,
                    int64_t cache_line_bytes, IntVec* for_touched_bytes,
                    ForBufferMap<IntVec>* buffer_touched_under_loop, arith::Analyzer* analyzer);
 
-  void Init(const BufferStoreNode* store, int n_loops);
+  void Init(const BlockRealizeNode* realize, int n_loops);
 
   void SetRegion(const LoopNest& loop_nest,                        //
                  IntVec* for_touched_bytes,                        //
@@ -397,7 +397,8 @@ struct Feature {
   std::vector<SubFeature> sub_features;
 };
 
-void Feature::Init(const BufferStoreNode* store, int n_loops) {
+void Feature::Init(const BlockRealizeNode* realize, int n_loops) {
+  // TODO: original implementation
   struct Info {
     AccessType access_type = AccessType::kUnknownRW;
     std::vector<MultiIndex> multi_indices;
@@ -527,7 +528,7 @@ void Feature::SubFeature::SetStride(const LoopNest& loop_nest, arith::Analyzer* 
 void Feature::SubFeature::SetReuse(const LoopNest& loop_nest, int64_t top_loop_touch_bytes,
                                    const ForBufferMap<IntVec>& buffer_touched_under_loop) {
   const BufferNode* buffer = this->buffer;
-  // Step 0. Collect all `Var`s that appears in the buffer region
+  // Step 3.1. Collect all `Var`s that appears in the buffer region
   std::unordered_set<const VarNode*> region_vars;
   for (const MultiIndex& multi_index : this->multi_indices) {
     for (const PrimExpr& index : multi_index) {
@@ -624,12 +625,12 @@ void Feature::SubFeature::SetFeature(const LoopNest& loop_nest, int64_t cache_li
   this->unique_lines_d_reuse_ct = this->unique_lines / proxy_reuse_ct;
 }
 
-Feature::Feature(const BufferStoreNode* store, const LoopNest& loop_nest, int64_t cache_line_bytes,
-                 IntVec* for_touched_bytes, ForBufferMap<IntVec>* buffer_touched_under_loop,
-                 arith::Analyzer* analyzer) {
+Feature::Feature(const BlockRealizeNode* realize, const LoopNest& loop_nest,
+                 int64_t cache_line_bytes, IntVec* for_touched_bytes,
+                 ForBufferMap<IntVec>* buffer_touched_under_loop, arith::Analyzer* analyzer) {
   int n_loops = loop_nest.loops.size();
   // Step 0. Initialize data structures
-  this->Init(store, n_loops);
+  this->Init(realize, n_loops);
   // Step 1. Calculate region-related feature
   this->SetRegion(loop_nest, for_touched_bytes, buffer_touched_under_loop, analyzer);
   // Step 2. Calculate stride-related feature
@@ -796,13 +797,13 @@ class PerBlockFeatureCollector : private StmtVisitor {
         cache_line_bytes_(cache_line_bytes),
         arith_intensity_curve_num_samples_(arith_intensity_curve_num_samples) {}
 
-  void VisitStmt_(const BlockRealizeNode* block) final {
+  void VisitStmt_(const BlockRealizeNode* realize) final {
     if (!scopes_.empty()) {
-      ordered_blocks_.push_back(block);
+      ordered_blocks_.push_back(realize);
     }
-    scopes_.push_back(block);
-    dfs_path_.push_back(block);
-    StmtVisitor::VisitStmt_(block);
+    scopes_.push_back(realize);
+    dfs_path_.push_back(realize);
+    StmtVisitor::VisitStmt_(realize);
     dfs_path_.pop_back();
     scopes_.pop_back();
     if (scopes_.empty()) {
@@ -816,12 +817,12 @@ class PerBlockFeatureCollector : private StmtVisitor {
         loops.push_back(static_cast<const ForNode*>(stmt));
       }
     }
-    Feature& feature = block_features_[block];
-    feature.block_realize = block;
+    Feature& feature = block_features_[realize];
+    feature.block_realize = realize;
     if (!scopes_.empty()) {
       AddArithOpsToScope(&feature.group1->arith_ops);
     }
-    feature.group1 = std::make_unique<group1::Feature>(block, loop_nest_, is_gpu_);
+    feature.group1 = std::make_unique<group1::Feature>(realize, loop_nest_, is_gpu_);
     feature.group3 =
         std::make_unique<group3::Feature>(arith_intensity_curve_num_samples_, loop_nest_,
                                           for_touched_bytes_, feature.group1->arith_ops);
