@@ -251,6 +251,7 @@ def tune_extracted_tasks(
     postprocs: Optional[FnPostproc] = None,
     mutator_probs: Optional[FnMutatorProb] = None,
     num_threads: Optional[int] = None,
+    use_tensorization: bool = False,
 ) -> Database:
     """Tune extracted tasks with a given target.
 
@@ -313,7 +314,7 @@ def tune_extracted_tasks(
     database = default_config.database(database, work_dir)
     builder = default_config.builder(builder)
     runner = default_config.runner(runner)
-    cost_model = default_config.cost_model(cost_model, config.adaptive_training)
+    cost_model = default_config.cost_model(cost_model, config.adaptive_training, use_tensorization)
     measure_callbacks = default_config.callbacks(measure_callbacks)
     # parse the tuning contexts
     tune_contexts = []
@@ -369,6 +370,7 @@ def tune_tir(
     mutator_probs: Optional[FnMutatorProb] = None,
     task_name: str = "main",
     num_threads: Optional[int] = None,
+    use_tensorization: bool = False,
 ) -> Optional[Schedule]:
     """Tune a TIR IRModule with a given target.
 
@@ -433,6 +435,7 @@ def tune_tir(
         postprocs=postprocs,
         mutator_probs=mutator_probs,
         num_threads=num_threads,
+        use_tensorization=use_tensorization,
     )
     with Profiler.timeit("ApplyHistoryBest"):
         bests: List[TuningRecord] = database.get_top_k(database.commit_workload(mod), top_k=1)
@@ -564,6 +567,7 @@ def tune_relay(
     """
     # pylint: disable=import-outside-toplevel
     from tvm import relay
+
     from .relay_integration import extract_task_from_relay
 
     # pylint: disable=protected-access, enable=import-outside-toplevel

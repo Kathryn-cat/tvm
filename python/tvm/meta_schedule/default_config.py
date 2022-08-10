@@ -28,7 +28,7 @@ from tvm.tir import PrimFunc
 from .builder import Builder, LocalBuilder
 from .cost_model import CostModel, XGBModel
 from .database import Database, JSONDatabase
-from .feature_extractor import PerStoreFeature
+from .feature_extractor import PerBlockFeature, PerStoreFeature
 from .measure_callback import MeasureCallback
 from .mutator import Mutator
 from .postproc import Postproc
@@ -142,11 +142,14 @@ def callbacks(  # pylint: disable=redefined-outer-name
 def cost_model(
     cost_model: Optional[CostModel],  # pylint: disable=redefined-outer-name
     adpative_training: Optional[bool],
+    use_tensorization: bool = False,
 ) -> CostModel:
     """Normalize the input to tvm.meta_schedule.CostModel"""
     if cost_model is None:
+        print(f"Use Tensorization: {use_tensorization}")
+        extractor = PerBlockFeature() if use_tensorization else PerStoreFeature()
         return XGBModel(  # type: ignore
-            extractor=PerStoreFeature(),
+            extractor=extractor,
             adaptive_training=adpative_training is None or adpative_training,
         )
     if not isinstance(cost_model, CostModel):
