@@ -15,7 +15,6 @@ def _parse_args():
 
 ARGS = _parse_args()
 
-
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp_dir:
         model_path = os.path.join(tmp_dir, "model.bin")
