@@ -24,18 +24,36 @@ def _parse_args():
 ARGS = _parse_args()
 
 
-@T.prim_func
-def Matmul(a: T.handle, b: T.handle, c: T.handle) -> None:
-    T.func_attr({"global_symbol": "main"})
-    A = T.match_buffer(a, (4096, 4096), "float16")
-    B = T.match_buffer(b, (4096, 4096), "float16")
-    C = T.match_buffer(c, (4096, 4096), "float16")
-    for i, j, k in T.grid(4096, 4096, 4096):
-        with T.block("matmul"):
-            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
-            with T.init():
-                C[vi, vj] = T.float16(0.0)
-            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+@tvm.script.ir_module
+class Matmul:
+    @T.prim_func
+    def main(a: T.handle, b: T.handle, c: T.handle) -> None:
+        T.func_attr({"global_symbol": "main"})
+        A = T.match_buffer(a, (4096, 4096), "float16")
+        B = T.match_buffer(b, (4096, 4096), "float16")
+        C = T.match_buffer(c, (4096, 4096), "float16")
+        for i, j, k in T.grid(4096, 4096, 4096):
+            with T.block("matmul"):
+                vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                with T.init():
+                    C[vi, vj] = T.float16(0.0)
+                C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+def get_search_space():
+    context = ms.TuneContext(
+        mod=Matmul,
+        target=tvm.target.Target("nvidia/nvidia-v100"),
+        space_generator=ms.space_generator.PostOrderApply(),
+        sch_rules=ms.default_config._DefaultCUDATensorCore.schedule_rules(),
+        postprocs=ms.default_config._DefaultCUDATensorCore.postprocs(),
+    )
+    design_spaces = context.generate_design_space()
+    for i, sch in enumerate(design_spaces):
+        print(f"design space: {i}")
+        print(sch.mod.script())
+        print(sch.trace)
+        print()
 
 
 def test_cuda_matmul():
@@ -132,6 +150,6 @@ def test_cuda_tensor_core(model_name, input_shape):
 
 
 if __name__ == "__main__":
-
     # test_cuda_tensor_core("bert_base", (8, 128))
-    test_cuda_matmul()
+    # test_cuda_matmul()
+    get_search_space()
