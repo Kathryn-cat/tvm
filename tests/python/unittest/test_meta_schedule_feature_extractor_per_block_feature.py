@@ -202,10 +202,25 @@ def test_cpu_matmul():
         candidates=[_make_candidate(_create_schedule)],
     )
     feature = feature.numpy()
-    # print(feature.shape)
-    # print(feature)
-    _print_feature(feature[0], 0, 10)
-    # assert feature.shape == (1, N_FEATURES)
+    assert feature.shape == (1, N_FEATURES)
+    f = feature[0]
+    # Group 1.1: arith
+    assert_allclose(
+        actual=f[0:16],
+        # fmt: off
+        desired=[
+            # float math ops
+            0, 27, 27, 0, 0, 0, 0,
+            # int math ops
+            0, 29, 29, 0, 0, 0, 0,
+            # bool/select ops
+            0, 0,
+        ],
+        # fmt: on
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    _print_feature(f, 0, 16)
 
 
 if __name__ == "__main__":

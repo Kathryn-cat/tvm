@@ -66,8 +66,81 @@ struct Feature {
     static constexpr int64_t kCount = 16;
 
     ArithOps() = default;
-    ArithOps(const BufferStoreNode* store, int64_t prod_loop_extent);
 
+    void AddExpr(const PrimExpr& expr, int64_t unit) {
+#define TVM_FEATURE_SIMPLE(Type, Counter) \
+  void VisitExpr_(const Type* op) final { \
+    result_->Counter += this->unit_;      \
+    ExprVisitor::VisitExpr_(op);          \
+  }
+#define TVM_FEATURE_BINARY(Type, FloatCounter, IntCounter) \
+  void VisitExpr_(const Type* op) final {                  \
+    if (op->dtype.is_float()) {                            \
+      result_->FloatCounter += this->unit_;                \
+    } else {                                               \
+      result_->IntCounter += this->unit_;                  \
+    }                                                      \
+    ExprVisitor::VisitExpr_(op);                           \
+  }
+      class ArithOpCounter : public ExprVisitor {
+       public:
+        TVM_FEATURE_SIMPLE(AndNode, bool_op);
+        TVM_FEATURE_SIMPLE(OrNode, bool_op);
+        TVM_FEATURE_SIMPLE(NotNode, bool_op);
+        TVM_FEATURE_SIMPLE(SelectNode, select_op);
+        TVM_FEATURE_BINARY(AddNode, float_add_sub, int_add_sub);
+        TVM_FEATURE_BINARY(SubNode, float_add_sub, int_add_sub);
+        TVM_FEATURE_BINARY(MulNode, float_mul, int_mul);
+        TVM_FEATURE_BINARY(DivNode, float_div_mod, int_div_mod);
+        TVM_FEATURE_BINARY(ModNode, float_div_mod, int_div_mod);
+        TVM_FEATURE_BINARY(FloorDivNode, float_div_mod, int_div_mod);
+        TVM_FEATURE_BINARY(FloorModNode, float_div_mod, int_div_mod);
+        TVM_FEATURE_BINARY(MaxNode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(MinNode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(EQNode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(NENode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(LTNode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(LENode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(GTNode, float_cmp, int_cmp);
+        TVM_FEATURE_BINARY(GENode, float_cmp, int_cmp);
+        void VisitExpr_(const CallNode* op) final {
+          static auto op_call_effect_ = Op::GetAttrMap<TCallEffectKind>("TCallEffectKind");
+          TCallEffectKind effect_kind = op_call_effect_[Downcast<Op>(op->op)];
+          bool is_pure = effect_kind == CallEffectKind::kPure ||
+                         effect_kind == CallEffectKind::kExprAnnotation;
+          if (is_pure) {
+            if (op->dtype.is_float()) {
+              result_->float_math_func += unit_;
+            } else {
+              result_->int_math_func += unit_;
+            }
+          } else {
+            if (op->dtype.is_float()) {
+              result_->float_other_func += unit_;
+            } else {
+              result_->int_other_func += unit_;
+            }
+          }
+          ExprVisitor::VisitExpr_(op);
+        }
+
+        int64_t unit_;
+        ArithOps* result_;
+      };
+#undef TVM_FEATURE_BINARY
+#undef TVM_FEATURE_SIMPLE
+      ArithOpCounter counter;
+      counter.unit_ = unit;
+      counter.result_ = this;
+      counter(expr);
+    }
+
+    // Feature::ArithOps::ArithOps(const BufferStoreNode* store, int64_t prod_loop_extent) {
+    //   ArithOpCounter counter;
+    //   counter.prod_loop_extent_ = prod_loop_extent;
+    //   counter(store->value);
+    //   *this = counter.result_;
+    // }
     void Export(std::vector<double>* v) const {
       double vs[] = {
           slog(float_mad), slog(float_add_sub),   slog(float_mul),        slog(float_div_mod),
@@ -162,75 +235,6 @@ struct Feature {
     v->insert(v->end(), std::begin(vs), std::end(vs));
   }
 };
-
-Feature::ArithOps::ArithOps(const BufferStoreNode* store, int64_t prod_loop_extent) {
-  class ArithOpCounter : public ExprVisitor {
-   public:
-#define TVM_FEATURE_SIMPLE(Type, Counter)       \
-  void VisitExpr_(const Type* op) final {       \
-    result_.Counter += this->prod_loop_extent_; \
-    ExprVisitor::VisitExpr_(op);                \
-  }
-#define TVM_FEATURE_BINARY(Type, FloatCounter, IntCounter) \
-  void VisitExpr_(const Type* op) final {                  \
-    if (op->dtype.is_float()) {                            \
-      result_.FloatCounter += this->prod_loop_extent_;     \
-    } else {                                               \
-      result_.IntCounter += this->prod_loop_extent_;       \
-    }                                                      \
-    ExprVisitor::VisitExpr_(op);                           \
-  }
-    TVM_FEATURE_SIMPLE(AndNode, bool_op);
-    TVM_FEATURE_SIMPLE(OrNode, bool_op);
-    TVM_FEATURE_SIMPLE(NotNode, bool_op);
-    TVM_FEATURE_SIMPLE(SelectNode, select_op);
-    TVM_FEATURE_BINARY(AddNode, float_add_sub, int_add_sub);
-    TVM_FEATURE_BINARY(SubNode, float_add_sub, int_add_sub);
-    TVM_FEATURE_BINARY(MulNode, float_mul, int_mul);
-    TVM_FEATURE_BINARY(DivNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(ModNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(FloorDivNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(FloorModNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(MaxNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(MinNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(EQNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(NENode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(LTNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(LENode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(GTNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(GENode, float_cmp, int_cmp);
-#undef TVM_FEATURE_BINARY
-#undef TVM_FEATURE_SIMPLE
-
-    void VisitExpr_(const CallNode* op) final {
-      static auto op_call_effect_ = Op::GetAttrMap<TCallEffectKind>("TCallEffectKind");
-      TCallEffectKind effect_kind = op_call_effect_[Downcast<Op>(op->op)];
-      bool is_pure =
-          effect_kind == CallEffectKind::kPure || effect_kind == CallEffectKind::kExprAnnotation;
-      if (is_pure) {
-        if (op->dtype.is_float()) {
-          result_.float_math_func += prod_loop_extent_;
-        } else {
-          result_.int_math_func += prod_loop_extent_;
-        }
-      } else {
-        if (op->dtype.is_float()) {
-          result_.float_other_func += prod_loop_extent_;
-        } else {
-          result_.int_other_func += prod_loop_extent_;
-        }
-      }
-      ExprVisitor::VisitExpr_(op);
-    }
-
-    int64_t prod_loop_extent_;
-    ArithOps result_;
-  };
-  ArithOpCounter counter;
-  counter.prod_loop_extent_ = prod_loop_extent;
-  counter(store->value);
-  *this = counter.result_;
-}
 
 Feature::ForKindFeature::ForKindFeature(const ForVec& loops) {
   if (loops.empty()) {
@@ -1069,29 +1073,18 @@ class PerBlockFeatureCollector : private StmtVisitor {
 
   void VisitStmt_(const BufferStoreNode* store) final {
     ICHECK(!scopes_.empty());
-    group1::Feature::ArithOps arith_ops = group1::Feature::ArithOps(store, loop_nest_.prod);
+    LOG(INFO) << "store = " << GetRef<BufferStore>(store)
+              << ", loop_nest_.prod = " << loop_nest_.prod;
+    group1::Feature::ArithOps arith_ops;
+    arith_ops.AddExpr(store->value, loop_nest_.prod);
     AddArithOpsToScope(&arith_ops);
   }
 
   void AddArithOpsToScope(group1::Feature::ArithOps* arith_ops) {
     const BlockRealizeNode* scope = scopes_.back();
-    // The product of the loops up to the parent
-    int64_t prod_loop_extent = 1;
-    for (auto iter = dfs_path_.rbegin(); iter != dfs_path_.rend(); ++iter) {
-      const StmtNode* stmt = *iter;
-      if (stmt == scope) {
-        break;
-      }
-      ICHECK(stmt->IsInstance<ForNode>());
-      if (const int64_t* extent = GetLoopIntExtent(static_cast<const ForNode*>(stmt))) {
-        prod_loop_extent *= *extent;
-      }
-    }
     // Add the arith_ops to the parent
     group1::Feature::ArithOps& parent_arith_ops = block_features_[scope].group1->arith_ops;
-#define TVM_FEATURE_MATH_OP_ADD(Name)                         \
-  parent_arith_ops.Name = arith_ops->Name * prod_loop_extent; \
-  arith_ops->Name *= loop_nest_.prod;
+#define TVM_FEATURE_MATH_OP_ADD(Name) parent_arith_ops.Name += arith_ops->Name;
     TVM_FEATURE_MATH_OP_ADD(float_mad);
     TVM_FEATURE_MATH_OP_ADD(float_add_sub);
     TVM_FEATURE_MATH_OP_ADD(float_mul);
@@ -1150,6 +1143,7 @@ class PerBlockFeatureNode : public FeatureExtractorNode {
     using namespace tvm::tir::per_block_feature;
     static transform::Sequential passes = tir::transform::PassListForFeatureExtraction();
     mod = passes(std::move(mod));
+    LOG(INFO) << "Extracting features from:\n" << tir::AsTVMScript(mod);
     std::vector<Feature> features = PerBlockFeatureCollector::Collect(
         is_gpu, this->cache_line_bytes, this->arith_intensity_curve_num_samples, mod);
     int n_features = features.size();
