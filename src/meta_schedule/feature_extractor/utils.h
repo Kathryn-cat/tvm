@@ -49,8 +49,7 @@ template <class V>
 using ForBufferMap = std::unordered_map<const ForNode*, std::unordered_map<const BufferNode*, V>>;
 
 /*! \brief Given x, compute log2(|x| + 1) */
-// inline double slog(double x) { return x >= 0 ? std::log2(x + 1) : std::log2(-x + 1); }
-inline double slog(double x) { return x > 0 ? std::log2(x) : x; }
+inline double slog(double x) { return x >= 0 ? std::log2(x + 1) : std::log2(-x + 1); }
 
 }  // namespace tir
 }  // namespace tvm

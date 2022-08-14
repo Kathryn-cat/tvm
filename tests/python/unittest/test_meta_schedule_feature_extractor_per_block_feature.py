@@ -157,7 +157,9 @@ def _feature_names(  # pylint: disable=invalid-name
             "alloc_outer_prod_local",
             "alloc_outer_prod_shared",
             "alloc_outer_prod_global",
-            "alloc_inner_prod",
+            "alloc_inner_prod_local",
+            "alloc_inner_prod_shared",
+            "alloc_inner_prod_global",
             "outer_prod",
             "num_loops",
             "auto_unroll_max_step",
@@ -220,7 +222,45 @@ def test_cpu_matmul():
         rtol=1e-5,
         atol=1e-5,
     )
-    _print_feature(f, 0, 16)
+    # Group 1.2: vectorize, unroll, parallel, GPU
+    assert_allclose(
+        actual=f[16:57],
+        desired=[
+            # fmt: off
+            # vectorize
+            1.0, 3.169924, 3.169924, 0, 0, 0, 0, 0, 0, 0, 1,
+            # unroll
+            1.0, 9.002815, 9.002815, 0, 0, 0, 0, 0, 0, 0, 1,
+            # parallel
+            1.58496, 11.0007, 6.022368, 0, 0, 0, 0, 0, 0, 0, 1,
+            # is_gpu, blockIdx.x/y/z, threadIdx.x/y/z, vthread
+            0.0, 1, 1, 1, 1, 1, 1, 1,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    # Group 4 & 5
+    _print_feature(f, 157, 172)
+    assert_allclose(
+        actual=f[157:172],
+        desired=[
+            # fmt: off
+            # alloc_size: local/shared/global
+            0, 0, 0,
+            # alloc_prod: local/shared/global
+            0, 0, 0,
+            # alloc_outer_prod: local/shared/global
+            1, 1, 1,
+            # alloc_inner_prod: local/shared/global
+            # outer_prod, num_loops, auto_unroll_max_step
+            27.000000010748916, 27.000000010748916, 27.000000010748916
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 if __name__ == "__main__":
