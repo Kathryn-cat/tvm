@@ -864,7 +864,7 @@ struct Feature {
                    arith::Analyzer* analyzer,
                    std::unordered_map<const Buffer*, int64_t>* alloc_buffer_outer_loops_) {
     for (const Buffer& buffer : realize->block->alloc_buffers) {
-      alloc_buffer_outer_loops_->at(&buffer) = loop_nest.prod;
+      (*alloc_buffer_outer_loops_)[&buffer] = loop_nest.prod;
       std::vector<int64_t> shape = utils::GetBufferShape(buffer, analyzer);
       int64_t numel = 1;
       for (int64_t x : shape) {
@@ -897,20 +897,20 @@ struct Feature {
       for (int64_t x : shape) {
         numel *= x;
       }
-      int64_t outer_loops = alloc_buffer_outer_loops_->at(&buffer);
+      int64_t outer_loops = (*alloc_buffer_outer_loops_)[&buffer];
       runtime::StorageScope storage_scope = runtime::StorageScope::Create(buffer.scope());
       switch (storage_scope.rank) {
         case runtime::StorageRank::kLocal:
           alloc_prod_local += numel * loop_nest.prod;
-          written_inner_prod_local += numel * (loop_nest.prod / outer_loops);
+          written_inner_prod_local += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
           break;
         case runtime::StorageRank::kShared:
           alloc_prod_shared += numel * loop_nest.prod;
-          written_inner_prod_shared += numel * (loop_nest.prod / outer_loops);
+          written_inner_prod_shared += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
           break;
         case runtime::StorageRank::kGlobal:
           alloc_prod_global += numel * loop_nest.prod;
-          written_inner_prod_global += numel * (loop_nest.prod / outer_loops);
+          written_inner_prod_global += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
           break;
         default:
           break;
