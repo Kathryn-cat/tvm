@@ -302,6 +302,7 @@ def test_cpu_matmul():
         rtol=1e-5,
         atol=1e-5,
     )
+    # TODO(@Kathryn-cat): Test group 3 - 5
 
 
 def test_cpu_fusion():
@@ -406,6 +407,7 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
+    # TODO(@Kathryn-cat): Test group 3 - 5
     ## Features for Block(C)
     f = feature[1]
     # Group 1: arith, loop
@@ -476,6 +478,7 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
+    # TODO(@Kathryn-cat): Test group 3 - 5
 
 
 def test_gpu():
@@ -536,8 +539,344 @@ def test_gpu():
         candidates=[_make_candidate(_create_schedule)],
     )
     feature = feature.numpy()
-    print(feature.shape)
     assert feature.shape == (4, N_FEATURES)
+    ### Check feature[0]: BufferStore(A_shared) <= A[...]
+    f = feature[0]
+    # Group 1.1: arith
+    assert_allclose(
+        actual=f[0:57],
+        desired=[
+            # fmt: off
+            # float math ops
+            0, 0, 0, 0, 0, 0, 0,
+            # int math ops
+            0, 24.000000085991324, 24.000000085991324, 24.000000085991324, 0, 0, 0,
+            # bool/select ops
+            0, 0,
+            # vectorize
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # unroll
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # parallel
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # is_gpu, blockIdx.x/y/z, threadIdx.x/y/z, vthread
+            1.0, 3.169925001442312, 1.0, 1.0, 4.087462841250339, 1.0, 1.0, 2.321928094887362,
+            # fmt: on
+            ######
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.1: Buffer A
+    assert_allclose(
+        actual=f[57:75],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            1, 0, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            25.000000042995662, 20.000001375860553, 23.00000017198264, 14.000088052430122,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            18.00000550343433, 20.00562591970089, 2.321928094887362,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            23.00000017198264, 18.00000550343433, 21.000000687930438, 12.0003521774803,
+            # stride
+            12.0003521774803,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.2: Buffer A.shared
+    assert_allclose(
+        actual=f[75:93],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            0, 1, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            25.000000042995662, 12.0003521774803, 23.00000017198264, 9.002815015607053,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            6.022367813028454, 11.98049663618346, 8.005624549193879,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            17.000011006847668, 4.087462841250339, 15.000044026886828, 1.584962500721156,
+            # stride
+            4.087462841250339,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.3 - 2.5: Dummy padding
+    assert_allclose(
+        actual=f[93:147],
+        desired=[0] * (18 * 3),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # TODO(@Kathryn-cat): Test group 3 - 5
+    ### Check feature[1]: BufferStore(B_shared) <= B[...]
+    f = feature[1]
+    # Group 1.1: arith
+    assert_allclose(
+        actual=f[0:57],
+        desired=[
+            # fmt: off
+            # float math ops
+            0, 0, 0, 0, 0, 0, 0,
+            # int math ops
+            0, 21.584962959341485, 21.584962959341485, 21.000000687930438, 0, 0, 0,
+            # bool/select ops
+            0, 0,
+            # vectorize
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # unroll
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # parallel
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # is_gpu, blockIdx.x/y/z, threadIdx.x/y/z, vthread
+            1.0, 3.169925001442312, 1.0, 1.0, 4.087462841250339, 1.0, 1.0, 2.321928094887362,
+            # fmt: on
+            ######
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.1: Buffer B
+    assert_allclose(
+        actual=f[57:75],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            1, 0, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            22.00000034396526, 20.000001375860553, 20.000001375860553, 14.000088052430122,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            15.000044026886828, 17.00563551321351, 2.321928094887362,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            20.000001375860553, 18.00000550343433, 18.00000550343433, 12.0003521774803,
+            # stride
+            4.087462841250339,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.2: Buffer B_shared
+    assert_allclose(
+        actual=f[75:93],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            0, 1, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            22.00000034396526, 9.002815015607053, 20.000001375860553, 3.169925001442312,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            3.169925001442312, 9.61654884377899, 8.005624549193879,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            14.000088052430122, 1.584962500721156, 12.0003521774803, 0.044394119358453436,
+            # stride
+            4.087462841250339,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.3 - 2.5: Dummy padding
+    assert_allclose(
+        actual=f[93:147],
+        desired=[0] * (18 * 3),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # TODO(@Kathryn-cat): Test group 3 - 5
+    ### Check feature[2]: BufferStore(C_local) <= C_local[...] + A_shared[...] * B_shared[...]
+    f = feature[2]
+    # Group 1.1: arith
+    assert_allclose(
+        actual=f[0:57],
+        desired=[
+            # fmt: off
+            # float math ops
+            0, 27.000000010748916, 27.000000010748916, 0, 0, 0, 0,
+            # int math ops
+            0, 28.000000005374456, 28.000000005374456, 0, 0, 0, 0,
+            # bool/select ops
+            0, 0,
+            # vectorize
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # unroll
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # parallel
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # is_gpu, blockIdx.x/y/z, threadIdx.x/y/z, vthread
+            1.0, 3.169925001442312, 1.0, 1.0, 4.087462841250339, 1.0, 1.0, 2.321928094887362,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.1: Buffer B_shared
+    assert_allclose(
+        actual=f[57:75],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            1, 0, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            29.00000000268723, 9.002815015607053, 23.00000017198264, 3.169925001442312,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            5.044394119358453, 7.651051691178929, 5.044394119358453,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            24.000000085991324, 4.087462841250339, 18.00000550343433, 0.32192809488736235,
+            # stride
+            1.0,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.2: Buffer C_local
+    assert_allclose(
+        actual=f[75:93],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            0, 0, 1,
+            # bytes, unique_bytes, lines, unique_lines
+            29.00000000268723, 11.000704269011246, 23.00000017198264, 5.044394119358453,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            0, 1, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            1.6147098441152081, 3.2094533656289497, 1,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            29.00000000268723, 11.000704269011246, 23.00000017198264, 5.044394119358453,
+            # stride
+            1.0,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.3: Buffer A_shared
+    assert_allclose(
+        actual=f[93:111],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            1, 0, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            29.00000000268723, 12.0003521774803, 19.00000275171979, 9.002815015607053,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            1.0, 3.700439718141092, 4.087462841250339,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            25.000000042995662, 8.005624549193879, 15.000044026886828, 5.044394119358453,
+            # stride
+            0.0,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.4 - 2.5: Dummy padding
+    assert_allclose(
+        actual=f[111:147],
+        desired=[0] * (18 * 2),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # TODO(@Kathryn-cat): Test group 3 - 5
+    ### Check feature[3]: BufferStore(C) <= C_local[...]
+    f = feature[3]
+    # Group 1.1: arith
+    assert_allclose(
+        actual=f[0:57],
+        desired=[
+            # fmt: off
+            # float math ops
+            0, 0, 0, 0, 0, 0, 0,
+            # int math ops
+            0, 0, 0, 0, 0, 0, 0,
+            # bool/select ops
+            0, 0,
+            # vectorize
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # unroll
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # parallel
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            # is_gpu, blockIdx.x/y/z, threadIdx.x/y/z, vthread
+            1.0, 3.169925001442312, 1.0, 1.0, 4.087462841250339, 1.0, 1.0, 2.321928094887362,
+            # fmt: on
+            ######
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.1: Buffer C
+    assert_allclose(
+        actual=f[57:75],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            0, 1, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            20.000001375860553, 20.000001375860553, 14.000088052430122, 14.000088052430122,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            0, 0, 1,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            0, 0, 0,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            21.000000687930438, 21.000000687930438, 15.000044026886828, 15.000044026886828,
+            # stride
+            1.0,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.2: Buffer C_local
+    assert_allclose(
+        actual=f[75:93],
+        desired=[
+            # fmt: off
+            # AccessType: read, write, read & write
+            1, 0, 0,
+            # bytes, unique_bytes, lines, unique_lines
+            20.000001375860553, 11.000704269011246, 14.000088052430122, 5.044394119358453,
+            # ReuseType: loop multiple read, serial multiple read write, no reuse
+            1, 0, 0,
+            # reuse_dis_iter, reuse_dis_bytes, reuse_ct
+            9.002815015607053, 12.0003521774803, 4.087462841250339,
+            # (byte, unique_bytes, lines, unique_lines) / reuse_ct
+            16.00002201361136, 7.011227255423254, 10.001408194392809, 1.584962500721156,
+            # stride
+            1.0,
+            # fmt: on
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 2.3 - 2.5: Dummy padding
+    assert_allclose(
+        actual=f[93:147],
+        desired=[0] * (18 * 3),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # TODO(@Kathryn-cat): Test group 3 - 5
 
 
 if __name__ == "__main__":

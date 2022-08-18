@@ -676,7 +676,6 @@ Feature::Feature(const BlockRealizeNode* realize, const LoopNest& loop_nest,
   for (SubFeature& feature : sub_features) {
     const BufferNode* buffer = feature.buffer_;
     int64_t numel = buffer_touched_under_loop.front().at(++buffer_idx);
-    // LOG(INFO) << "feature: " << feature.buffer_->name << ", numel = " << numel;
     feature.SetFeature(loop_nest, cache_line_bytes, numel * buffer->dtype.bytes());
   }
   // Step 5. Calculate `for_touched_bytes`
@@ -701,14 +700,6 @@ Feature::Feature(const BlockRealizeNode* realize, const LoopNest& loop_nest,
     }
     return a.buffer_->name < b.buffer_->name;
   });
-  /*
-  {
-    int i = -1;
-    for (SubFeature& feature : sub_features) {
-      LOG(INFO) << "Buffer #" << (++i) << ": " << feature.buffer_->name;
-    }
-  }
-  */
 }
 
 }  // namespace group2
@@ -999,7 +990,6 @@ class PerBlockFeatureCollector : private StmtVisitor {
     std::vector<Feature> result;
     result.reserve(collector.block_features_.size());
     for (const BlockRealizeNode* realize : collector.ordered_blocks_) {
-      // LOG(INFO) << "Block: " << realize->block->name_hint;
       Feature& feature = collector.block_features_.at(realize);
       ICHECK(feature.block_realize == realize);
       ICHECK(feature.group1);
@@ -1128,7 +1118,6 @@ class PerBlockFeatureNode : public FeatureExtractorNode {
     using namespace tvm::tir::per_block_feature;
     static transform::Sequential passes = tir::transform::PassListForFeatureExtraction();
     mod = passes(std::move(mod));
-    // LOG(INFO) << "mod =\n" << tir::AsTVMScript(mod);
     std::vector<Feature> features = PerBlockFeatureCollector::Collect(
         is_gpu, this->cache_line_bytes, this->arith_intensity_curve_num_samples, mod);
     int n_features = features.size();
