@@ -321,6 +321,17 @@ def test_cpu_matmul():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            27.0,
+            2.5849626064300537,
+            0.0,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 def test_cpu_fusion():
@@ -432,6 +443,17 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            11.000703811645508,
+            1.5849624872207642,
+            0.0,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ## Features for Block(C)
     f = feature[1]
     # Group 1: arith, loop
@@ -506,6 +528,17 @@ def test_cpu_fusion():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            11.000703811645508,
+            1.5849624872207642,
+            0.0,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
@@ -655,6 +688,17 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            23.00000017198264,
+            2.584962500721156,
+            10.001408,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ### Check feature[1]: BufferStore(B_shared) <= B[...]
     f = feature[1]
     # Group 1.1: arith
@@ -737,6 +781,17 @@ def test_gpu():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            20.000001375860553,
+            2.584962500721156,
+            10.001408,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
@@ -857,6 +912,17 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            27.000000010748916,
+            3.0,
+            10.001408,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ### Check feature[3]: BufferStore(C) <= C_local[...]
     f = feature[3]
     # Group 1.1: arith
@@ -939,6 +1005,17 @@ def test_gpu():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 5: misc
+    assert_allclose(
+        actual=f[169:],
+        desired=[
+            18.00000550343433,
+            2.584962500721156,
+            10.001408,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
