@@ -18,8 +18,9 @@
 import sys
 from typing import Callable, List
 
-import tvm
 from numpy.testing import assert_allclose
+
+import tvm
 from tvm import meta_schedule as ms
 from tvm import te, tir
 from tvm.script import tir as T
@@ -302,7 +303,24 @@ def test_cpu_matmul():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[
+            0.7097842693328857,
+            0.7408391237258911,
+            0.8750449419021606,
+            0.9449487924575806,
+            1.0148526430130005,
+            1.0847564935684204,
+            1.113688349723816,
+            1.1394684314727783,
+            1.2119636535644531,
+            1.2971993684768677,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 def test_cpu_fusion():
@@ -407,7 +425,13 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ## Features for Block(C)
     f = feature[1]
     # Group 1: arith, loop
@@ -478,7 +502,13 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 def test_gpu():
@@ -618,7 +648,13 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ### Check feature[1]: BufferStore(B_shared) <= B[...]
     f = feature[1]
     # Group 1.1: arith
@@ -697,7 +733,13 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ### Check feature[2]: BufferStore(C_local) <= C_local[...] + A_shared[...] * B_shared[...]
     f = feature[2]
     # Group 1.1: arith
@@ -797,7 +839,24 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[
+            0.7097842504665767,
+            0.7548801745187567,
+            0.8775907547541741,
+            0.9957389916154509,
+            1.2446737395193135,
+            1.493608487423176,
+            1.7093103019954263,
+            1.8031580276850985,
+            1.9841832691827785,
+            2.204648076869754,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     ### Check feature[3]: BufferStore(C) <= C_local[...]
     f = feature[3]
     # Group 1.1: arith
@@ -876,7 +935,13 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
-    # TODO(@Kathryn-cat): Test group 3 - 5
+    # Group 3: Arithmetic intensity
+    assert_allclose(
+        actual=f[147:157],
+        desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 if __name__ == "__main__":
