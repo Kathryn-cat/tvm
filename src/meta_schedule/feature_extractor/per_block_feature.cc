@@ -787,30 +787,27 @@ struct Feature {
   int64_t alloc_size_local = 0;
   int64_t alloc_size_shared = 0;
   int64_t alloc_size_global = 0;
-  // alloc_outer_prod * written_inner_prod / buffer size
+  // alloc_outer_prod * buffer size
   int64_t alloc_prod_local = 0;
   int64_t alloc_prod_shared = 0;
   int64_t alloc_prod_global = 0;
-  // The product of lengths of loops outside the scope of the alloc * buffer size
+  // The product of lengths of loops outside the scope of the alloc
   int64_t alloc_outer_prod_local = 0;
   int64_t alloc_outer_prod_shared = 0;
   int64_t alloc_outer_prod_global = 0;
-  // The product of lengths of loops inside the scope of alloc before the buffer is written to *
-  // buffer size
-  int64_t written_inner_prod_local = 0;
-  int64_t written_inner_prod_shared = 0;
-  int64_t written_inner_prod_global = 0;
+  // The product of lengths of loops inside the scope of alloc before the buffer is written to
+  int64_t alloc_inner_prod_local = 0;
+  int64_t alloc_inner_prod_shared = 0;
+  int64_t alloc_inner_prod_global = 0;
 
   static constexpr int64_t kCount = 12;
 
   void Export(std::vector<double>* v) const {
     double vs[] = {
-        slog(alloc_size_local),          slog(alloc_size_shared),
-        slog(alloc_size_global),         slog(alloc_prod_local),
-        slog(alloc_prod_shared),         slog(alloc_prod_global),
-        slog(alloc_outer_prod_local),    slog(alloc_outer_prod_shared),
-        slog(alloc_outer_prod_global),   slog(written_inner_prod_local),
-        slog(written_inner_prod_shared), slog(written_inner_prod_global),
+        slog(alloc_size_local),       slog(alloc_size_shared),       slog(alloc_size_global),
+        slog(alloc_prod_local),       slog(alloc_prod_shared),       slog(alloc_prod_global),
+        slog(alloc_outer_prod_local), slog(alloc_outer_prod_shared), slog(alloc_outer_prod_global),
+        slog(alloc_inner_prod_local), slog(alloc_inner_prod_shared), slog(alloc_inner_prod_global),
     };
     v->insert(v->end(), std::begin(vs), std::end(vs));
   }
@@ -819,33 +816,10 @@ struct Feature {
 
   explicit Feature(const LoopNest& loop_nest, const BlockRealizeNode* realize,
                    arith::Analyzer* analyzer,
-                   std::unordered_map<const Buffer*, int64_t>* alloc_buffer_outer_loops_) {
+                   std::unordered_map<const BufferNode*, int64_t>* alloc_buffer_loop_prod) {
     for (const Buffer& buffer : realize->block->alloc_buffers) {
-      (*alloc_buffer_outer_loops_)[&buffer] = loop_nest.prod;
-      std::vector<int64_t> shape = utils::GetBufferShape(buffer, analyzer);
-      int64_t numel = 1;
-      for (int64_t x : shape) {
-        numel *= x;
-      }
-      runtime::StorageScope storage_scope = runtime::StorageScope::Create(buffer.scope());
-      switch (storage_scope.rank) {
-        case runtime::StorageRank::kLocal:
-          alloc_size_local += numel * buffer->dtype.bytes();
-          alloc_outer_prod_local += numel * loop_nest.prod;
-          break;
-        case runtime::StorageRank::kShared:
-          alloc_size_shared += numel * buffer->dtype.bytes();
-          alloc_outer_prod_shared += numel * loop_nest.prod;
-          break;
-        case runtime::StorageRank::kGlobal:
-          alloc_size_global += numel * buffer->dtype.bytes();
-          alloc_outer_prod_global += numel * loop_nest.prod;
-          break;
-        default:
-          break;
-      }
+      (*alloc_buffer_loop_prod)[buffer.get()] = loop_nest.prod;
     }
-
     const Array<BufferRegion> write_buffers = realize->block->writes;
     for (const BufferRegion& write_buffer : write_buffers) {
       const Buffer& buffer = write_buffer->buffer;
@@ -854,20 +828,26 @@ struct Feature {
       for (int64_t x : shape) {
         numel *= x;
       }
-      int64_t outer_loops = (*alloc_buffer_outer_loops_)[&buffer];
+      int64_t outer_loops = (*alloc_buffer_loop_prod)[buffer.get()];
       runtime::StorageScope storage_scope = runtime::StorageScope::Create(buffer.scope());
       switch (storage_scope.rank) {
         case runtime::StorageRank::kLocal:
-          alloc_prod_local += numel * loop_nest.prod;
-          written_inner_prod_local += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
+          alloc_size_local += numel * buffer->dtype.bytes();
+          alloc_prod_local += numel * outer_loops;
+          alloc_outer_prod_local += outer_loops;
+          alloc_inner_prod_local += static_cast<double>(loop_nest.prod) / outer_loops;
           break;
         case runtime::StorageRank::kShared:
-          alloc_prod_shared += numel * loop_nest.prod;
-          written_inner_prod_shared += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
+          alloc_size_shared += numel * buffer->dtype.bytes();
+          alloc_prod_shared += numel * outer_loops;
+          alloc_outer_prod_shared += outer_loops;
+          alloc_inner_prod_shared += static_cast<double>(loop_nest.prod) / outer_loops;
           break;
         case runtime::StorageRank::kGlobal:
-          alloc_prod_global += numel * loop_nest.prod;
-          written_inner_prod_global += numel * (static_cast<double>(loop_nest.prod) / outer_loops);
+          alloc_size_global += numel * buffer->dtype.bytes();
+          alloc_prod_global += numel * outer_loops;
+          alloc_outer_prod_global += outer_loops;
+          alloc_inner_prod_global += static_cast<double>(loop_nest.prod) / outer_loops;
           break;
         default:
           break;
@@ -879,7 +859,6 @@ struct Feature {
 }  // namespace group4
 
 namespace group5 {
-
 /*! \brief Group 5 feature */
 struct Feature {
   int64_t outer_prod;        // The product of lengths of outer loops
@@ -984,6 +963,9 @@ class PerBlockFeatureCollector : private StmtVisitor {
     PerBlockFeatureCollector collector(is_gpu, cache_line_bytes, arith_intensity_curve_num_samples);
     for (const auto& kv : mod->functions) {
       if (const PrimFuncNode* func = kv.second.as<PrimFuncNode>()) {
+        for (const auto& it : func->buffer_map) {
+          collector.alloc_buffer_loop_prod_[it.second.get()] = 1;
+        }
         collector(func->body);
       }
     }
@@ -1013,6 +995,9 @@ class PerBlockFeatureCollector : private StmtVisitor {
     ordered_blocks_.push_back(realize);
     int previous_num_blocks_visited = ++this->num_blocks_visited_;
     scopes_.push_back(realize);
+    for (const Buffer& buffer : realize->block->alloc_buffers) {
+      alloc_buffer_loop_prod_[buffer.get()] = loop_nest_.prod;
+    }
     StmtVisitor::VisitStmt_(realize);
     scopes_.pop_back();
     // only extract features for leaf blocks
@@ -1030,7 +1015,7 @@ class PerBlockFeatureCollector : private StmtVisitor {
           std::make_unique<group3::Feature>(arith_intensity_curve_num_samples_, loop_nest_,
                                             for_touched_bytes, feature.group1->arith_ops);
       feature.group4 = std::make_unique<group4::Feature>(loop_nest_, realize, &analyzer_,
-                                                         &alloc_buffer_outer_loops_);
+                                                         &alloc_buffer_loop_prod_);
       feature.group5 = std::make_unique<group5::Feature>(loop_nest_);
       block_features_.emplace(realize, Feature{});
     } else {
@@ -1087,7 +1072,7 @@ class PerBlockFeatureCollector : private StmtVisitor {
   arith::Analyzer analyzer_;
   std::vector<const BlockRealizeNode*> scopes_;
   LoopNest loop_nest_ = {};
-  std::unordered_map<const Buffer*, int64_t> alloc_buffer_outer_loops_ = {};
+  std::unordered_map<const BufferNode*, int64_t> alloc_buffer_loop_prod_ = {};
   std::unordered_map<const BlockRealizeNode*, Feature> block_features_ = {};
   std::vector<const BlockRealizeNode*> ordered_blocks_;
 };

@@ -15,14 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-module-docstring,missing-function-docstring,missing-class-docstring
-import sys
 from typing import Callable, List
 
 from numpy.testing import assert_allclose
 
 import tvm
 from tvm import meta_schedule as ms
-from tvm import te, tir
+from tvm import tir
 from tvm.script import tir as T
 
 N_FEATURES = 172
@@ -321,6 +320,26 @@ def test_cpu_matmul():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            0.0,
+            20.000001375860553,
+            0.0,
+            0.0,
+            18.00000550343433,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            27.000000010748916,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     # Group 5: misc
     assert_allclose(
         actual=f[169:],
@@ -443,6 +462,26 @@ def test_cpu_fusion():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            0.0,
+            13.000176099486442,
+            0.0,
+            0.0,
+            11.000704269011246,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            11.000704269011246,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     # Group 5: misc
     assert_allclose(
         actual=f[169:],
@@ -528,6 +567,26 @@ def test_cpu_fusion():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            0.0,
+            13.000176099486442,
+            0.0,
+            0.0,
+            11.000704269011246,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            11.000704269011246,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
@@ -688,6 +747,26 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            12.0003521774803,
+            0.0,
+            0.0,
+            27.000000010748916,
+            0.0,
+            0.0,
+            17.000011006847668,
+            0.0,
+            0.0,
+            6.022367813028454,
+            0.0,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     # Group 5: misc
     assert_allclose(
         actual=f[169:],
@@ -781,6 +860,26 @@ def test_gpu():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            9.002815015607053,
+            0.0,
+            0.0,
+            24.000000085991324,
+            0.0,
+            0.0,
+            17.000011006847668,
+            0.0,
+            0.0,
+            3.169925001442312,
+            0.0,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
@@ -912,6 +1011,26 @@ def test_gpu():
         rtol=1e-5,
         atol=1e-5,
     )
+    # Group 4: Memory allocation
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            11.000704269011246,
+            0.0,
+            0.0,
+            18.00000550343433,
+            0.0,
+            0.0,
+            9.002815015607053,
+            0.0,
+            0.0,
+            18.00000550343433,
+            0.0,
+            0.0,
+        ],
+        rtol=1e-5,
+        atol=1e-5,
+    )
     # Group 5: misc
     assert_allclose(
         actual=f[169:],
@@ -1005,6 +1124,25 @@ def test_gpu():
     assert_allclose(
         actual=f[147:157],
         desired=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    assert_allclose(
+        actual=f[157:169],
+        desired=[
+            0.0,
+            0.0,
+            20.000001375860553,
+            0.0,
+            0.0,
+            18.00000550343433,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            18.00000550343433,
+        ],
         rtol=1e-5,
         atol=1e-5,
     )
