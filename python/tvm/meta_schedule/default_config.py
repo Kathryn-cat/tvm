@@ -141,16 +141,18 @@ def callbacks(  # pylint: disable=redefined-outer-name
 
 def cost_model(
     cost_model: Optional[CostModel],  # pylint: disable=redefined-outer-name
-    adpative_training: Optional[bool],
+    adaptive_training: Optional[bool],
     use_tensorization: bool = False,
 ) -> CostModel:
     """Normalize the input to tvm.meta_schedule.CostModel"""
     if cost_model is None:
         print(f"Use Tensorization: {use_tensorization}")
         extractor = PerBlockFeature() if use_tensorization else PerStoreFeature()
+        print(f"adaptive training: {adaptive_training or False}")
         return XGBModel(  # type: ignore
             extractor=extractor,
-            adaptive_training=adpative_training is None or adpative_training,
+            adaptive_training=adaptive_training or False,
+            num_warmup_samples=200,
         )
     if not isinstance(cost_model, CostModel):
         raise TypeError(f"Expected `cost_model` to be CostModel, but gets: {cost_model}")

@@ -331,7 +331,7 @@ class XGBModel(PyCostModel):
         num_warmup_samples: int = 100,
         # evaluation
         early_stopping_rounds: int = 50,
-        verbose_eval: int = 25,
+        verbose_eval: int = 20,
         average_peak_n: int = 32,
         adaptive_training: bool = True,
     ):
@@ -477,7 +477,7 @@ class XGBModel(PyCostModel):
 
         # Steps 3. Run validation
         if group is not None and self.booster is not None:
-            logger.debug(
+            logger.info(
                 "XGB validation: %s",
                 "\t".join(
                     f"{key}: {score:.6f}"
@@ -731,7 +731,7 @@ def custom_callback(
             for key, score in eval_result:
                 if "null" not in key:
                     info.append(f"{key}: {score:.6f}")
-            logger.debug("XGB iter %3d: %s", iteration, "\t".join(info))
+            logger.info("XGB iter %3d: %s", iteration, "\t".join(info))
 
         ##### Choose score and do early stopping #####
         score = None
@@ -759,7 +759,7 @@ def custom_callback(
         elif env.iteration - best_iteration >= early_stopping_rounds:
             best_msg = state["best_msg"]
             if verbose_eval and env.rank == 0:
-                logger.debug("XGB stopped. Best iteration: %s ", best_msg)
+                logger.info("XGB stopped. Best iteration: %s ", best_msg)
             raise EarlyStopException(best_iteration)
 
     return callback

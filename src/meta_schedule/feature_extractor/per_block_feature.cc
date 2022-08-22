@@ -1001,7 +1001,8 @@ class PerBlockFeatureCollector : private StmtVisitor {
     StmtVisitor::VisitStmt_(realize);
     scopes_.pop_back();
     // only extract features for leaf blocks
-    if (previous_num_blocks_visited == this->num_blocks_visited_) {
+    if (previous_num_blocks_visited == this->num_blocks_visited_ &&
+        HasBufferStore(realize->block.get())) {
       IntVec for_touched_bytes;
       Feature& feature = block_features_[realize];
       feature.block_realize = realize;
@@ -1065,6 +1066,16 @@ class PerBlockFeatureCollector : private StmtVisitor {
 #undef TVM_FEATURE_MATH_OP_ADD
   }
 
+  bool HasBufferStore(const BlockNode* block) {
+    bool has_buffer_store = false;
+    PostOrderVisit(block->body, [&has_buffer_store](const ObjectRef& obj) {
+      if (obj->IsInstance<BufferStoreNode>()) {
+        has_buffer_store = true;
+      }
+    });
+    return has_buffer_store;
+  }
+
   bool is_gpu_;
   int num_blocks_visited_ = 0;
   int64_t cache_line_bytes_;
@@ -1103,6 +1114,7 @@ class PerBlockFeatureNode : public FeatureExtractorNode {
     using namespace tvm::tir::per_block_feature;
     static transform::Sequential passes = tir::transform::PassListForFeatureExtraction();
     mod = passes(std::move(mod));
+    // LOG(INFO) << "IR Module: \n" << tir::AsTVMScript(mod);
     std::vector<Feature> features = PerBlockFeatureCollector::Collect(
         is_gpu, this->cache_line_bytes, this->arith_intensity_curve_num_samples, mod);
     int n_features = features.size();
@@ -1110,6 +1122,7 @@ class PerBlockFeatureNode : public FeatureExtractorNode {
     for (int i = 0; i < n_features; ++i) {
       const Feature& feature = features[i];
       std::vector<double>& result = (*results)[i];
+      // LOG(INFO) << "i = " << i << ", feature: " << feature.block_realize->block->name_hint;
       result.reserve(feature_vector_length);
       feature.group1->Export(&result);
       feature.group2->Export(&result, this->buffers_per_block);

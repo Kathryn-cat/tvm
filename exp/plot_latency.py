@@ -21,6 +21,8 @@ if __name__ == "__main__":
     x = np.linspace(1, num_rounds, num=num_rounds)
     y_orig = np.mean(data[:, :num_runs], axis=1)
     y_ten = np.mean(data[:, num_runs:], axis=1)
+    print(f"original average: {y_orig}")
+    print(f"tensorization average: {y_ten}")
     y_orig_std = np.std(data[:, :num_runs], axis=1)
     y_ten_std = np.std(data[:, num_runs:], axis=1)
     plt.plot(x, y_orig, "g-", label="original")
@@ -28,8 +30,8 @@ if __name__ == "__main__":
     plt.fill_between(x, y_orig - y_orig_std, y_orig + y_orig_std, color="g", alpha=0.25)
     plt.fill_between(x, y_ten - y_ten_std, y_ten + y_ten_std, color="b", alpha=0.25)
     plt.xlabel("# rounds")
-    plt.ylabel("Latency")
-    plt.legend(loc="upper right")
+    plt.ylabel("GFLOPS")
+    plt.legend(loc="lower right")
     plt.savefig(ARGS.save_path)
 
     diff = (y_ten - y_orig) / y_orig
