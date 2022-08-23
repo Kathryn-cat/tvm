@@ -9,6 +9,7 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--load_path", type=str)
     parser.add_argument("--save_path", type=str)
+    parser.add_argument("--latency_to_gflops", action="store_true")
     return parser.parse_args()
 
 
@@ -17,6 +18,8 @@ ARGS = _parse_args()
 
 if __name__ == "__main__":
     data = genfromtxt(ARGS.load_path, delimiter=",", skip_header=2)
+    if ARGS.latency_to_gflops:
+        data = 137438953.472 / data
     num_rounds, num_runs = data.shape[0], data.shape[1] // 2
     x = np.linspace(1, num_rounds, num=num_rounds)
     y_orig = np.mean(data[:, :num_runs], axis=1)
