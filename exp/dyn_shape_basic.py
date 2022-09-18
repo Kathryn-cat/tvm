@@ -40,3 +40,23 @@ print(func1)
 print(func2)
 print(func3)
 """
+
+"""
+a minimal tuning example:
+
+target = tvm.target.Target("nvidia/geforce-rtx-3090")
+a, b, c, m, n, p = matmul.params
+with ms.Profiler() as profiler:
+    sch: tvm.tir.Schedule = ms.tune_tir(
+        mod=matmul.specialize({m: 256, n: 256, p: 256}),
+        target=target,
+        config=ms.TuneConfig(
+            num_trials_per_iter=32,
+            max_trials_per_task=1000,
+            max_trials_global=1000,
+        ),
+        sch_rules=ms.default_config._DefaultCUDATensorCore.schedule_rules,
+        postprocs=ms.default_config._DefaultCUDATensorCore.postprocs,
+        work_dir="logs",
+    )
+"""
