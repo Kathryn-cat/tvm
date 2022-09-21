@@ -7,10 +7,22 @@ from tvm.tir.tensor_intrin import cuda as _
 
 
 @T.prim_func
-def vectoradd(a: T.handle, b: T.handle, c: T.handle, m: T.int32) -> None:
-    A = T.match_buffer(a, (m), "float32")
-    B = T.match_buffer(b, (m), "float32")
-    C = T.match_buffer(c, (m), "float32")
+def vectoradd_const(a: T.handle, b: T.handle, c: T.handle) -> None:
+    A = T.match_buffer(a, (256, ), "float32")
+    B = T.match_buffer(b, (256, ), "float32")
+    C = T.match_buffer(c, (256, ), "float32")
+    for i in T.grid(256):
+        with T.block("update"):
+            vi = T.axis.remap("S", [i])
+            C[vi] = A[vi] + B[vi]
+
+
+@T.prim_func
+def vectoradd(a: T.handle, b: T.handle, c: T.handle) -> None:
+    m = T.var("int32")
+    A = T.match_buffer(a, (m, ), "float32")
+    B = T.match_buffer(b, (m, ), "float32")
+    C = T.match_buffer(c, (m, ), "float32")
     for i in T.grid(m):
         with T.block("update"):
             vi = T.axis.remap("S", [i])
@@ -19,7 +31,10 @@ def vectoradd(a: T.handle, b: T.handle, c: T.handle, m: T.int32) -> None:
 
 # m, n, p should be multiples of 16
 @T.prim_func
-def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
+def matmul(a: T.handle, b: T.handle, c: T.handle) -> None:
+    m = T.var("int32")
+    n = T.var("int32")
+    p = T.var("int32")
     A = T.match_buffer(a, (m, n), "float16")
     B = T.match_buffer(b, (n, p), "float16")
     C = T.match_buffer(c, (m, p), "float16")
@@ -150,12 +165,11 @@ def default_postprocs():
         M.RewriteTensorize(),
         M.VerifyGPUCode(),
     ]
-
 # find out the search space
-def find_search_space_vectoradd(m1):
-    a, b, c, m = vectoradd.params
+
+def find_search_space_vectoradd_const():
     context = ms.TuneContext(
-        mod=vectoradd.specialize({m: m1}),
+        mod=vectoradd_const,
         target=tvm.target.Target("nvidia/geforce-rtx-3090"),
         space_generator=ms.space_generator.PostOrderApply(),
         sch_rules=ms.default_config._DefaultCUDA.schedule_rules,
@@ -169,10 +183,25 @@ def find_search_space_vectoradd(m1):
         print()
 
 # find out the search space
-def find_search_space_matmul(m1, n1, p1):
-    a, b, c, m, n, p = matmul.params
+def find_search_space_vectoradd():
     context = ms.TuneContext(
-        mod=matmul.specialize({m: m1, n: n1, p: p1}),
+        mod=vectoradd,
+        target=tvm.target.Target("nvidia/geforce-rtx-3090"),
+        space_generator=ms.space_generator.PostOrderApply(),
+        sch_rules=ms.default_config._DefaultCUDA.schedule_rules,
+        postprocs=ms.default_config._DefaultCUDA.postprocs,
+    )
+    design_spaces = context.generate_design_space()
+    for i, sch in enumerate(design_spaces):
+        print(f"design space: {i}")
+        print(sch.mod.script())
+        print(sch.trace)
+        print()
+
+# find out the search space
+def find_search_space_matmul():
+    context = ms.TuneContext(
+        mod=matmul,
         target=tvm.target.Target("nvidia/geforce-rtx-3090"),
         space_generator=ms.space_generator.PostOrderApply(),
         sch_rules=default_schedule_rules(),
@@ -184,6 +213,22 @@ def find_search_space_matmul(m1, n1, p1):
         print(sch.mod.script())
         print(sch.trace)
         print()
+
+def tune_vectoradd_const():
+    target = tvm.target.Target("nvidia/geforce-rtx-3090")
+    with ms.Profiler() as profiler:
+        sch: tvm.tir.Schedule = ms.tune_tir(
+            mod=vectoradd_const,
+            target=target,
+            config=ms.TuneConfig(
+                num_trials_per_iter=32,
+                max_trials_per_task=1000,
+                max_trials_global=1000,
+            ),
+            sch_rules=ms.default_config._DefaultCUDATensorCore.schedule_rules,
+            postprocs=ms.default_config._DefaultCUDATensorCore.postprocs,
+            work_dir="logs/vectoradd_const",
+        )
 
 
 """
@@ -283,4 +328,4 @@ def apply_trace(sch: tir.Schedule) -> None:
 """
 
 if __name__ == "__main__":
-    find_search_space_vectoradd(256)
+    tune_vectoradd_const()
