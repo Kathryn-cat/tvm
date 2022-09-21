@@ -9,6 +9,7 @@ from tvm.tir.tensor_intrin import cuda as _
 
 @T.prim_func
 def vectoradd_const(a: T.handle, b: T.handle, c: T.handle) -> None:
+    T.func_attr({"global_symbol": "vectoradd_const", "tir.noalias": True})
     A = T.match_buffer(a, (256, ), "float32")
     B = T.match_buffer(b, (256, ), "float32")
     C = T.match_buffer(c, (256, ), "float32")
@@ -232,7 +233,11 @@ def tune_vectoradd_const():
         )
 
 def search_space_vectoradd_const(sch: tir.Schedule) -> None:
-    pass
+    block_u = sch.get_block("update")
+    i, = sch.get_loops(block=block_u)
+    i0, i1 = sch.split(i, [None, 64])
+    sch.bind(i0, "blockIdx.x")
+    sch.bind(i1, "threadIdx.x")
 
 def search_space_vectoradd(sch: tir.Schedule) -> None:
     pass
