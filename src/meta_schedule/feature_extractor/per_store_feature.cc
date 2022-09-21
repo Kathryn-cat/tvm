@@ -1356,6 +1356,7 @@ class PerStoreFeatureNode : public FeatureExtractorNode {
   void ExtractSingle(IRModule mod, bool is_gpu, std::vector<std::vector<double>>* results) {
     static transform::Sequential passes = tir::transform::PassListForPerStoreFeature();
     mod = passes(std::move(mod));
+    LOG(INFO) << tir::AsTVMScript(mod);
     std::vector<tir::Feature> features = tir::PerStoreFeatureCollector::Collect(
         is_gpu, this->cache_line_bytes, this->arith_intensity_curve_num_samples, mod);
     int n_features = features.size();
