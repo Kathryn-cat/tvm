@@ -151,9 +151,25 @@ def default_postprocs():
         M.VerifyGPUCode(),
     ]
 
+# find out the search space
+def find_search_space_vectoradd(m1):
+    a, b, c, m = vectoradd.params
+    context = ms.TuneContext(
+        mod=vectoradd.specialize({m: m1}),
+        target=tvm.target.Target("nvidia/geforce-rtx-3090"),
+        space_generator=ms.space_generator.PostOrderApply(),
+        sch_rules=ms.default_config._DefaultCUDA.schedule_rules,
+        postprocs=ms.default_config._DefaultCUDA.postprocs,
+    )
+    design_spaces = context.generate_design_space()
+    for i, sch in enumerate(design_spaces):
+        print(f"design space: {i}")
+        print(sch.mod.script())
+        print(sch.trace)
+        print()
 
 # find out the search space
-def find_search_space(m1, n1, p1):
+def find_search_space_matmul(m1, n1, p1):
     a, b, c, m, n, p = matmul.params
     context = ms.TuneContext(
         mod=matmul.specialize({m: m1, n: n1, p: p1}),
@@ -267,4 +283,4 @@ def apply_trace(sch: tir.Schedule) -> None:
 """
 
 if __name__ == "__main__":
-    find_search_space(4080, 4096, 4096)
+    find_search_space_vectoradd(256)
