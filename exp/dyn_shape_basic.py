@@ -6,6 +6,17 @@ from tvm.script import tir as T
 from tvm.tir.tensor_intrin import cuda as _
 
 
+@T.prim_func
+def vectoradd(a: T.handle, b: T.handle, c: T.handle, m: T.int32) -> None:
+    A = T.match_buffer(a, (m), "float32")
+    B = T.match_buffer(b, (m), "float32")
+    C = T.match_buffer(c, (m), "float32")
+    for i in T.grid(m):
+        with T.block("update"):
+            vi = T.axis.remap("S", [i])
+            C[vi] = A[vi] + B[vi]
+
+
 # m, n, p should be multiples of 16
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
@@ -254,3 +265,6 @@ def apply_trace(sch: tir.Schedule) -> None:
   v135 = sch.sample_categorical(candidates=[0, 16, 64, 512, 1024], probs=[0.20000000000000001, 0.20000000000000001, 0.20000000000000001, 0.20000000000000001, 0.20000000000000001], decision=0)  // decision can vary
   sch.annotate(block_or_loop=b1, ann_key="meta_schedule.unroll_explicit", ann_val=v135)
 """
+
+if __name__ == "__main__":
+    find_search_space(4080, 4096, 4096)
