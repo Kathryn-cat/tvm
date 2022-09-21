@@ -1,6 +1,7 @@
 from dyn_search_space import *
 
 if __name__ == "__main__":
+    '''
     print(f'original vectoradd_const')
     print(vectoradd_const.script())
     sch = tvm.tir.Schedule(vectoradd_const)
@@ -8,3 +9,11 @@ if __name__ == "__main__":
     print(f'new module')
     print(sch.mod.script())
     vectoradd_const_mod = tvm.build(sch.mod, target="cuda")
+    '''
+
+    print(f'original vectoradd')
+    print(vectoradd.script())
+    sch = tvm.tir.Schedule(vectoradd)
+    search_space_vectoradd(sch)
+    print(f'new module')
+    print(sch.mod.script())

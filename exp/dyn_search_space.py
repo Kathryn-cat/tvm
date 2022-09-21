@@ -49,7 +49,8 @@ def matmul(a: T.handle, b: T.handle, c: T.handle) -> None:
 
 
 def search_space_vectoradd_const(sch: tir.Schedule) -> None:
-    # question: should we bind block/thread to var?
+    # don't need to cache anything?
+    # vectorize / unroll?
     block_u = sch.get_block("update")
     i, = sch.get_loops(block=block_u)
     i0, i1 = sch.split(i, [None, 64])
@@ -57,7 +58,12 @@ def search_space_vectoradd_const(sch: tir.Schedule) -> None:
     sch.bind(i1, "threadIdx.x")
 
 def search_space_vectoradd(sch: tir.Schedule) -> None:
-    pass
+    # question: should we bind block/thread to var?
+    block_u = sch.get_block("update")
+    i, = sch.get_loops(block=block_u)
+    i0, i1 = sch.split(i, [None, 2])
+    sch.bind(i0, "blockIdx.x")
+    sch.bind(i1, "threadIdx.x")
 
 def search_space_matmul(sch: tir.Schedule) -> None:
     pass
