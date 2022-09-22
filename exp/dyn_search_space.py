@@ -21,6 +21,7 @@ def vectoradd_const(a: T.handle, b: T.handle, c: T.handle) -> None:
 
 @T.prim_func
 def vectoradd(a: T.handle, b: T.handle, c: T.handle) -> None:
+    T.func_attr({"global_symbol": "vectoradd", "tir.noalias": True})
     m = T.var("int32")
     A = T.match_buffer(a, (m, ), "float32")
     B = T.match_buffer(b, (m, ), "float32")
