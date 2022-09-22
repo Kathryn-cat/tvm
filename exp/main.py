@@ -31,3 +31,8 @@ if __name__ == "__main__":
 
     print(f"original matmul")
     print(matmul.script())
+    sch = tvm.tir.Schedule(matmul)
+    search_space_matmul(sch)
+    print(f'new module')
+    print(sch.mod.script())
+    matmul_mod = tvm.build(sch.mod, target="cuda")

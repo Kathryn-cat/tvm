@@ -35,6 +35,7 @@ def vectoradd(a: T.handle, b: T.handle, c: T.handle) -> None:
 # m, n, p should be multiples of 16
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle) -> None:
+    T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
     m = T.var("int32")
     n = T.var("int32")
     p = T.var("int32")
@@ -67,4 +68,17 @@ def search_space_vectoradd(sch: tir.Schedule) -> None:
     sch.bind(i1, "threadIdx.x")
 
 def search_space_matmul(sch: tir.Schedule) -> None:
-    pass
+    # basic loop split
+    block_u = sch.get_block("update")
+    i, j, k = sch.get_loops(block=block_u)
+    i0, i1, i2 = sch.split(loop=i, factors=[None, 2, 16])
+    j0, j1, j2 = sch.split(loop=j, factors=[None, 2, 16])
+    k0, k1 = sch.split(loop=k, factors=[None, 4])
+    sch.reorder(i0, j0, i1, j1, k0, k1, i2, j2)
+    sch.bind(i0, "blockIdx.y")
+    sch.bind(j0, "blockIdx.x")
+    sch.bind(i1, "threadIdx.y")
+    sch.bind(j1, "threadIdx.x")
+    sch.unroll(k1)
+    sch.decompose_reduction(block_u, k0)
+    # cache read and write
