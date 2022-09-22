@@ -35,4 +35,4 @@ if __name__ == "__main__":
     search_space_matmul(sch)
     print(f'new module')
     print(sch.mod.script())
-    matmul_mod = tvm.build(sch.mod, target="cuda")
+    # matmul_mod = tvm.build(sch.mod, target="cuda")

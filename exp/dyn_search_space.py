@@ -68,17 +68,26 @@ def search_space_vectoradd(sch: tir.Schedule) -> None:
     sch.bind(i1, "threadIdx.x")
 
 def search_space_matmul(sch: tir.Schedule) -> None:
-    # basic loop split
+    # loop split and binding
     block_u = sch.get_block("update")
     i, j, k = sch.get_loops(block=block_u)
     i0, i1, i2 = sch.split(loop=i, factors=[None, 2, 16])
     j0, j1, j2 = sch.split(loop=j, factors=[None, 2, 16])
-    k0, k1 = sch.split(loop=k, factors=[None, 4])
-    sch.reorder(i0, j0, i1, j1, k0, k1, i2, j2)
+    k0, k1, k2 = sch.split(loop=k, factors=[None, 4, 16])
+    sch.reorder(i0, j0, i1, j1, k0, k1, i2, j2, k2)
+    sch.unroll(k1)
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
     sch.bind(i1, "threadIdx.y")
     sch.bind(j1, "threadIdx.x")
-    sch.unroll(k1)
+    # cache read
+    A_shared = sch.cache_read(block=block_u, read_buffer_index=0, storage_scope="shared")
+    B_shared = sch.cache_read(block=block_u, read_buffer_index=1, storage_scope="shared")
+    sch.compute_at(block=A_shared, loop=k0)
+    sch.compute_at(block=B_shared, loop=k0)
+    # cache write
+    C_shared = sch.cache_write(block_u, 0, "shared")
+    sch.reverse_compute_at(C_shared, j1)
+    # decompose
     sch.decompose_reduction(block_u, k0)
-    # cache read and write
+    # tensorization
