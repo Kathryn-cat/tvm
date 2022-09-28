@@ -27,7 +27,7 @@ def schedule_vectoradd(sch: tir.Schedule) -> None:
     # question: should we bind block/thread to var?
     block_u = sch.get_block("update")
     i, = sch.get_loops(block=block_u)
-    v = sch.sample_categorical(candidates=[1, 2, 4, 8, 16, 32, 64, 128], probs=[0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125])
+    v = sch.sample_categorical(candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1/7, 1/7, 1/7, 1/7, 1/7, 1/7, 1/7])
     i0, i1 = sch.split(i, [None, v])
     sch.bind(i0, "blockIdx.x")
     sch.bind(i1, "threadIdx.x")
