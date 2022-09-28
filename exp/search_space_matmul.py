@@ -42,7 +42,13 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
     sch.compute_at(block=A_shared, loop=i1)
     sch.compute_at(block=B_shared, loop=i1)
-    # sch.decompose_reduction(block_u, k0)
+    b_local = sch.blockize(k0)
+    C_local = sch.cache_write(b_local, 0, "local")
+    sch.reverse_compute_at(C_local, j1)
+    A_local = sch.cache_read(block=b_local, read_buffer_index=1, storage_scope="local")
+    B_local = sch.cache_read(block=b_local, read_buffer_index=2, storage_scope="local")
+    sch.compute_at(block=A_local, loop=j1)
+    sch.compute_at(block=B_local, loop=j1)
 
 if __name__ == "__main__":
     sch = tvm.tir.Schedule(matmul)
