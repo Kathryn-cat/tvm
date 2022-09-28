@@ -7,6 +7,21 @@ from tvm.script import tir as T
 from tvm.tir.tensor_intrin import cuda as _
 
 
+# fixed shape matmul
+@T.prim_func
+def matmulStatic(a: T.handle, b: T.handle, c: T.handle) -> None:
+    T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
+    A = T.match_buffer(a, (1024, 1024), "float16")
+    B = T.match_buffer(b, (1024, 1024), "float16")
+    C = T.match_buffer(c, (1024, 1024), "float16")
+    for i, j, k in T.grid(1024, 1024, 1024):
+        with T.block("C"):
+            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+            with T.init():
+                C[vi, vj] = T.float16(0.0)
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
 # for now, we only consider 1024, 2048, 4096
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
@@ -49,6 +64,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     B_local = sch.cache_read(block=b_local, read_buffer_index=2, storage_scope="local")
     sch.compute_at(block=A_local, loop=j1)
     sch.compute_at(block=B_local, loop=j1)
+    #sch.tensorize(block_or_loop=b_mm, tensor_intrin="wmma_16x16x16_f16") - TODO: argument?
 
 if __name__ == "__main__":
     sch = tvm.tir.Schedule(matmul)
@@ -67,4 +83,21 @@ if __name__ == "__main__":
     num_flop = 2 * 1024
     evaluator = vectoradd_mod.time_evaluator("vectoradd", dev, number=10)
     print("vectoradd running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
+    """
+
+    """
+    target = tvm.target.Target("nvidia/geforce-rtx-3090")
+    with ms.Profiler() as profiler:
+        sch: tvm.tir.Schedule = ms.tune_tir(
+            mod=matmulStatic,
+            target=target,
+            config=ms.TuneConfig(
+                num_trials_per_iter=32,
+                max_trials_per_task=1000,
+                max_trials_global=1000,
+            ),
+            sch_rules=ms.default_config._DefaultCUDATensorCore.schedule_rules,
+            postprocs=ms.default_config._DefaultCUDATensorCore.postprocs,
+            work_dir="logs/test-1",
+        )
     """

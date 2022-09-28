@@ -1,0 +1,76 @@
+@tvm.script.ir_module
+class Module:
+    @T.prim_func
+    def main(A: T.Buffer[(1024, 1024), "float16"], B: T.Buffer[(1024, 1024), "float16"], C: T.Buffer[(1024, 1024), "float16"]) -> None:
+        # function attr dict
+        T.func_attr({"global_symbol": "main", "tir.noalias": True})
+        # body
+        # with T.block("root")
+        for blockIdx_y in T.thread_binding(4, thread="blockIdx.y", annotations={"pragma_auto_unroll_max_step":1024, "pragma_unroll_explicit":1}):
+            for blockIdx_x in T.thread_binding(16, thread="blockIdx.x"):
+                for threadIdx_y in T.thread_binding(2, thread="threadIdx.y"):
+                    for threadIdx_x in T.thread_binding(32, thread="threadIdx.x"):
+                        with T.block():
+                            T.reads(A[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 : blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + 256, 0 : 1024], B[0 : 1024, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 : blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + 64])
+                            T.writes(C[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 : blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + 256, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 : blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + 512])
+                            C_reindex_shared = T.alloc_buffer([256, 64], dtype="float16", scope="shared")
+                            with T.block():
+                                T.reads(A[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 : blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + 256, 0 : 1024], B[0 : 1024, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 : blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + 64])
+                                T.writes(C_reindex_shared[0 : 256, threadIdx_y * 32 : threadIdx_y * 32 + 32])
+                                C_reindex_shared_wmma_accumulator = T.alloc_buffer([256, 32], dtype="float16", scope="wmma.accumulator")
+                                for ax0_0_3_init, ax1_0_3_init, ax0_0_4_init in T.grid(8, 2, 2):
+                                    with T.block("C_o_init"):
+                                        T.reads()
+                                        T.writes(C_reindex_shared_wmma_accumulator[ax0_0_3_init * 32 + ax0_0_4_init * 16 : ax0_0_3_init * 32 + ax0_0_4_init * 16 + 16, ax1_0_3_init * 16 : ax1_0_3_init * 16 + 16])
+                                        T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":32, "warp_execution":1})
+                                        T.evaluate(T.tvm_fill_fragment(C_reindex_shared_wmma_accumulator.data, 16, 16, 16, ax0_0_3_init * 4 + ax0_0_4_init * 2 + ax1_0_3_init * 16 // 16, T.float32(0), dtype="handle"))
+                                for ax2_0_0 in T.serial(32):
+                                    with T.block():
+                                        T.reads(A[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 : blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + 256, ax2_0_0 * 32 : ax2_0_0 * 32 + 32], B[ax2_0_0 * 32 : ax2_0_0 * 32 + 32, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 : blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + 64], C_reindex_shared_wmma_accumulator[0 : 256, 0 : 32])
+                                        T.writes(C_reindex_shared_wmma_accumulator[0 : 256, 0 : 32])
+                                        A_reindex_shared = T.alloc_buffer([256, 32], dtype="float16", strides=[40, 1], scope="shared")
+                                        B_reindex_shared_wmma_matrix_b = T.alloc_buffer([32, 32], dtype="float16", scope="wmma.matrix_b")
+                                        B_reindex_shared = T.alloc_buffer([32, 64], dtype="float16", strides=[72, 1], scope="shared")
+                                        A_reindex_shared_wmma_matrix_a = T.alloc_buffer([256, 32], dtype="float16", scope="wmma.matrix_a")
+                                        for ax0_ax1_fused_0 in T.serial(64):
+                                            for ax0_ax1_fused_3 in T.vectorized(2):
+                                                with T.block("A_reindex_shared"):
+                                                    T.reads(A[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + ax0_ax1_fused_0 * 4 + threadIdx_y * 2 + (threadIdx_x * 2 + ax0_ax1_fused_3) // 32, ax2_0_0 * 32 + (threadIdx_x * 2 + ax0_ax1_fused_3) % 32])
+                                                    T.writes(A_reindex_shared[ax0_ax1_fused_0 * 4 + threadIdx_y * 2 + (threadIdx_x * 2 + ax0_ax1_fused_3) // 32, (threadIdx_x * 2 + ax0_ax1_fused_3) % 32])
+                                                    T.block_attr({"buffer_dim_align":[[0, 0, 32, 8]]})
+                                                    A_reindex_shared[ax0_ax1_fused_0 * 4 + threadIdx_y * 2 + (threadIdx_x * 2 + ax0_ax1_fused_3) // 32, (threadIdx_x * 2 + ax0_ax1_fused_3) % 32] = A[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + ax0_ax1_fused_0 * 4 + threadIdx_y * 2 + (threadIdx_x * 2 + ax0_ax1_fused_3) // 32, ax2_0_0 * 32 + (threadIdx_x * 2 + ax0_ax1_fused_3) % 32]
+                                        for ax0_ax1_fused_0 in T.serial(32):
+                                            with T.block("B_reindex_shared"):
+                                                T.reads(B[ax2_0_0 * 32 + ax0_ax1_fused_0, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + (threadIdx_y * 32 + threadIdx_x)])
+                                                T.writes(B_reindex_shared[ax0_ax1_fused_0, threadIdx_y * 32 + threadIdx_x])
+                                                T.block_attr({"buffer_dim_align":[[0, 0, 32, 8]]})
+                                                B_reindex_shared[ax0_ax1_fused_0, threadIdx_y * 32 + threadIdx_x] = B[ax2_0_0 * 32 + ax0_ax1_fused_0, blockIdx_y % 2 * 512 + blockIdx_x % 8 * 64 + (threadIdx_y * 32 + threadIdx_x)]
+                                        for ax0_0, ax1_0 in T.grid(16, 2):
+                                            with T.block("A_reindex_shared_wmma.matrix_a_o"):
+                                                T.reads(A_reindex_shared[ax0_0 * 16 : ax0_0 * 16 + 16, ax1_0 * 16 : ax1_0 * 16 + 16])
+                                                T.writes(A_reindex_shared_wmma_matrix_a[ax0_0 * 16 : ax0_0 * 16 + 16, ax1_0 * 16 : ax1_0 * 16 + 16])
+                                                T.evaluate(T.tvm_load_matrix_sync(A_reindex_shared_wmma_matrix_a.data, 16, 16, 16, ax0_0 * 2 + ax1_0, T.tvm_access_ptr(T.type_annotation(dtype="float16"), A_reindex_shared.data, ax0_0 * 640 + ax1_0 * 16, 640, 1, dtype="handle"), 40, "row_major", dtype="handle"))
+                                        for ax0_0, ax1_0 in T.grid(2, 2):
+                                            with T.block("B_reindex_shared_wmma.matrix_b_o"):
+                                                T.reads(B_reindex_shared[ax0_0 * 16 : ax0_0 * 16 + 16, threadIdx_y * 32 + ax1_0 * 16 : threadIdx_y * 32 + ax1_0 * 16 + 16])
+                                                T.writes(B_reindex_shared_wmma_matrix_b[ax0_0 * 16 : ax0_0 * 16 + 16, ax1_0 * 16 : ax1_0 * 16 + 16])
+                                                T.evaluate(T.tvm_load_matrix_sync(B_reindex_shared_wmma_matrix_b.data, 16, 16, 16, ax0_0 * 2 + ax1_0, T.tvm_access_ptr(T.type_annotation(dtype="float16"), B_reindex_shared.data, ax0_0 * 1152 + threadIdx_y * 32 + ax1_0 * 16, 1152, 1, dtype="handle"), 72, "row_major", dtype="handle"))
+                                        for ax0_0_3, ax1_0_3, ax2_0_2, ax0_0_4 in T.grid(8, 2, 2, 2):
+                                            with T.block("C_o_update"):
+                                                T.reads(C_reindex_shared_wmma_accumulator[ax0_0_3 * 32 + ax0_0_4 * 16 : ax0_0_3 * 32 + ax0_0_4 * 16 + 16, ax1_0_3 * 16 : ax1_0_3 * 16 + 16], A_reindex_shared_wmma_matrix_a[ax0_0_3 * 32 + ax0_0_4 * 16 : ax0_0_3 * 32 + ax0_0_4 * 16 + 16, ax2_0_2 * 16 : ax2_0_2 * 16 + 16], B_reindex_shared_wmma_matrix_b[ax2_0_2 * 16 : ax2_0_2 * 16 + 16, ax1_0_3 * 16 : ax1_0_3 * 16 + 16])
+                                                T.writes(C_reindex_shared_wmma_accumulator[ax0_0_3 * 32 + ax0_0_4 * 16 : ax0_0_3 * 32 + ax0_0_4 * 16 + 16, ax1_0_3 * 16 : ax1_0_3 * 16 + 16])
+                                                T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":32, "warp_execution":1})
+                                                T.evaluate(T.tvm_mma_sync(C_reindex_shared_wmma_accumulator.data, ax0_0_3 * 4 + ax0_0_4 * 2 + ax1_0_3 * 16 // 16, A_reindex_shared_wmma_matrix_a.data, ax0_0_3 * 4 + ax0_0_4 * 2 + ax2_0_2 * 16 // 16, B_reindex_shared_wmma_matrix_b.data, ax2_0_2 * 2 + ax1_0_3, C_reindex_shared_wmma_accumulator.data, ax0_0_3 * 4 + ax0_0_4 * 2 + ax1_0_3 * 16 // 16, dtype="handle"))
+                                for ax0_0, ax1_0 in T.grid(16, 2):
+                                    with T.block("C_reindex_shared_wmma.accumulator_o"):
+                                        T.reads(C_reindex_shared_wmma_accumulator[ax0_0 * 16 : ax0_0 * 16 + 16, ax1_0 * 16 : ax1_0 * 16 + 16])
+                                        T.writes(C_reindex_shared[ax0_0 * 16 : ax0_0 * 16 + 16, threadIdx_y * 32 + ax1_0 * 16 : threadIdx_y * 32 + ax1_0 * 16 + 16])
+                                        T.evaluate(T.tvm_store_matrix_sync(C_reindex_shared_wmma_accumulator.data, 16, 16, 16, ax0_0 * 2 + ax1_0, T.tvm_access_ptr(T.type_annotation(dtype="float16"), C_reindex_shared.data, ax0_0 * 1024 + threadIdx_y * 32 + ax1_0 * 16, 1024, 2, dtype="handle"), 64, "row_major", dtype="handle"))
+                            for ax0 in T.serial(256):
+                                for ax1_3 in T.vectorized(8):
+                                    with T.block("C_reindex_shared"):
+                                        T.where(threadIdx_y * 256 + threadIdx_x * 8 + ax1_3 < 64)
+                                        T.reads(C_reindex_shared[ax0, threadIdx_y * 256 + threadIdx_x * 8 + ax1_3])
+                                        T.writes(C[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + ax0, blockIdx_y % 2 * 512 + threadIdx_y * 256 + blockIdx_x % 8 * 64 + threadIdx_x * 8 + ax1_3])
+                                        C[blockIdx_y // 2 * 512 + blockIdx_x // 8 * 256 + ax0, blockIdx_y % 2 * 512 + threadIdx_y * 256 + blockIdx_x % 8 * 64 + threadIdx_x * 8 + ax1_3] = C_reindex_shared[ax0, threadIdx_y * 256 + threadIdx_x * 8 + ax1_3]
+
