@@ -1,3 +1,5 @@
+import argparse
+
 import numpy as np
 
 import tvm
@@ -66,10 +68,11 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.compute_at(block=B_local, loop=j1)
     sch.tensorize(block_or_loop=b_mm, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
 
-def apply_trace():
+def apply_trace(sch):
   b0 = sch.get_block(name="C", func_name="main")
   b1 = sch.get_block(name="root", func_name="main")
   sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
+  """
   b2 = sch.reindex(block=b0, buffer=("write", 0))
   b3 = sch.reindex(block=b0, buffer=("read", 0))
   b4 = sch.reindex(block=b0, buffer=("read", 1))
@@ -221,13 +224,23 @@ def apply_trace():
   b238 = sch.get_block(name="C_reindex_shared_wmma.accumulator_o", func_name="main")
   sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
   sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
+  """
 
 
 if __name__ == "__main__":
-    sch = tvm.tir.Schedule(matmul)
-    schedule_matmul(sch)
-    sch.mod.show()
-    matmul_mod = tvm.build(sch.mod, target="cuda")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mine", action='store_true')
+    args = parser.parse_args()
+
+    if args.mine:
+        sch = tvm.tir.Schedule(matmul)
+        schedule_matmul(sch)
+        sch.mod.show()
+        #matmul_mod = tvm.build(sch.mod, target="cuda")
+    else:
+        sch = tvm.tir.Schedule(matmul)
+        apply_trace(sch)
+        sch.mod.show()
 
     """
     # evaluate the running time
