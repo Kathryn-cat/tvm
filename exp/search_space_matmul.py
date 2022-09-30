@@ -71,6 +71,11 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
     res = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
     l_g22, l_g23, l_g24, l_g25 = sch.split(loop=l_g2r, factors=[*res])
+    # split l_g3
+    v1_g3 = sch.sample_categorical(candidates=cand, probs=prob)
+    l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
+    res = sch.sample_perfect_tile(loop=l_g3r, n=4, max_innermost_factor=4)
+    l_g32, l_g33, l_g34, l_g35 = sch.split(loop=l_g3r, factors=[*res])
     """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
@@ -187,11 +192,11 @@ def apply_trace(sch):
     l39, l40, l41, l42, l43 = sch.split(
         loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
     )
-    """
     v44, v45, v46 = sch.sample_perfect_tile(
         loop=l23, n=3, max_innermost_factor=4, decision=[16, 4, 1]
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
+    """
     sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
     l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
     sch.bind(loop=l50, thread_axis="blockIdx.y")
