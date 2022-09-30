@@ -66,6 +66,11 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
     v2_g1, v3_g1, v4_g1, v5_g1 = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
     l_g12, l_g13, l_g14, l_g15 = sch.split(loop=l_g1r, factors=[v2_g1, v3_g1, v4_g1, v5_g1])
+    # split l_g2
+    v1_g2 = sch.sample_categorical(candidates=cand, probs=prob)
+    l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
+    v2_g2, v3_g2, v4_g2, v5_g2 = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
+    l_g22, l_g23, l_g24, l_g25 = sch.split(loop=l_g2r, factors=[v2_g2, v3_g2, v4_g2, v5_g2])
     """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
@@ -176,13 +181,13 @@ def apply_trace(sch):
     l29, l30, l31, l32, l33 = sch.split(
         loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
     )
-    """
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
         loop=l22, n=5, max_innermost_factor=4, decision=[2, 4, 2, 2, 2]
     )
     l39, l40, l41, l42, l43 = sch.split(
         loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
     )
+    """
     v44, v45, v46 = sch.sample_perfect_tile(
         loop=l23, n=3, max_innermost_factor=4, decision=[16, 4, 1]
     )
