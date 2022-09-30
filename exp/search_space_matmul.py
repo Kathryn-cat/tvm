@@ -44,19 +44,27 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_write_0 = sch.reindex(block=b_C, buffer=("write", 0))  # buffer for writing
     b_read_0 = sch.reindex(block=b_C, buffer=("read", 0))
     b_read_1 = sch.reindex(block=b_C, buffer=("read", 1))
+    sch.transform_layout(
+        block=b_C,
+        buffer=("read", 1),
+        index_map=lambda vj, vk: (
+            vk,
+            vj,
+        ),
+    )
     i, j, k = sch.get_loops(block=b_C)
+    i0, i1 = sch.split(loop=i, factors=[None, 16])
+    j0, j1 = sch.split(loop=j, factors=[None, 16])
+    k0, k1 = sch.split(loop=k, factors=[None, 16])
+    sch.reorder(i0, j0, k0, i1, j1, k1)
+    """
     v1 = sch.sample_categorical(
         candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
     )
     v2 = sch.sample_categorical(
         candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
     )
-    i0, i1, i2 = sch.split(loop=i, factors=[None, v1, 16])
-    j0, j1, j2 = sch.split(loop=j, factors=[None, v2, 16])
-    k0, k1 = sch.split(loop=k, factors=[None, 16])
-    sch.reorder(i0, j0, i1, j1, k0, i2, j2, k1)
     b_mm = sch.blockize(i2)
-    """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
     sch.bind(i1, "threadIdx.y")
@@ -141,12 +149,13 @@ def apply_trace(sch):
             vk,
         ),
     )
-    l5, l6, l7 = sch.get_loops(block=b0)
+    l5, l6, l7 = sch.get_loops(block=b0)  # from outer to inner
     l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
     l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
     l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
     l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
     sch.reorder(l16, l18, l13, l11, l9)
+    """
     b20 = sch.blockize(loop=l13)
     sch.annotate(
         block_or_loop=b20,
@@ -326,6 +335,7 @@ def apply_trace(sch):
     b238 = sch.get_block(name="C_reindex_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
+    """
 
 
 if __name__ == "__main__":
