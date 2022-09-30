@@ -64,13 +64,13 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
-    v2_g1, v3_g1, v4_g1, v5_g1 = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
-    l_g12, l_g13, l_g14, l_g15 = sch.split(loop=l_g1r, factors=[v2_g1, v3_g1, v4_g1, v5_g1])
+    res = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
+    l_g12, l_g13, l_g14, l_g15 = sch.split(loop=l_g1r, factors=[*res])
     # split l_g2
     v1_g2 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
-    v2_g2, v3_g2, v4_g2, v5_g2 = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
-    l_g22, l_g23, l_g24, l_g25 = sch.split(loop=l_g2r, factors=[v2_g2, v3_g2, v4_g2, v5_g2])
+    res = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
+    l_g22, l_g23, l_g24, l_g25 = sch.split(loop=l_g2r, factors=[*res])
     """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
