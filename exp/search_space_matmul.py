@@ -58,6 +58,8 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     k0, k1 = sch.split(loop=k, factors=[None, 16])
     sch.reorder(i0, j0, k0, i1, j1, k1)
     b_mm = sch.blockize(i1)
+    # loop max size is m, n, p
+    # l_g1, l_g2, l_g3 = sch.get_loops(b_mm)
     """
     v1 = sch.sample_categorical(
         candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
@@ -336,6 +338,16 @@ def apply_trace(sch):
     sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
     """
+
+
+def params(n, k):
+    """Assume input (64, 3), output [4., 8., 2.]"""
+    log = int(np.floor(np.log2(n)))
+    res = np.zeros(k)
+    for _ in range(log):
+        a = np.random.randint(k)
+        res[a] += 1
+    return list(2 ** res.astype(np.int32))
 
 
 if __name__ == "__main__":
