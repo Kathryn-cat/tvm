@@ -24,14 +24,14 @@ def matmulStatic(a: T.handle, b: T.handle, c: T.handle) -> None:
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
-# for now, we only consider 1024, 2048, 4096
+# we handle all the shapes of multiple of 16
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (1024 * m, 1024 * n), "float16")
-    B = T.match_buffer(b, (1024 * n, 1024 * p), "float16")
-    C = T.match_buffer(c, (1024 * m, 1024 * p), "float16")
-    for i, j, k in T.grid(1024 * m, 1024 * n, 1024 * p):
+    A = T.match_buffer(a, (16 * m, 16 * n), "float16")
+    B = T.match_buffer(b, (16 * n, 16 * p), "float16")
+    C = T.match_buffer(c, (16 * m, 16 * p), "float16")
+    for i, j, k in T.grid(16 * m, 16 * n, 16 * p):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
