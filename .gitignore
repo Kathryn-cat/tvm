@@ -269,4 +269,6 @@ gallery/how_to/work_with_microtvm/micro_tvmc.py
 # Used in CI to communicate between Python and Jenkins
 .docker-image-names/
 
-exp/logs/*
+**/logs/*
+
+node_modules/
