@@ -59,14 +59,14 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.reorder(i0, j0, k0, i1, j1, k1)
     b_mm = sch.blockize(i1)
     # loop max size is m, n, p
-    # l_g1, l_g2, l_g3 = sch.get_loops(b_mm)
+    l_g1, l_g2, l_g3 = sch.get_loops(b_mm)
+    cand, prob = categ(8)
+    # split l_g1
+    v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
+    l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
+    v2_g1, v3_g1, v4_g1, v5_g1 = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
+    l_g12, l_g13, l_g14, l_g15 = sch.split(loop=l_g1r, factors=[v2_g1, v3_g1, v4_g1, v5_g1])
     """
-    v1 = sch.sample_categorical(
-        candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
-    )
-    v2 = sch.sample_categorical(
-        candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
-    )
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
     sch.bind(i1, "threadIdx.y")
@@ -340,14 +340,13 @@ def apply_trace(sch):
     """
 
 
-def params(n, k):
-    """Assume input (64, 3), output [4., 8., 2.]"""
-    log = int(np.floor(np.log2(n)))
-    res = np.zeros(k)
-    for _ in range(log):
-        a = np.random.randint(k)
-        res[a] += 1
-    return list(2 ** res.astype(np.int32))
+def categ(k):
+    """should tweak weights in the future to account for independence"""
+    arr = np.arange(k + 1)
+    cand = 2**arr
+    cand = [int(i) for i in cand]
+    prob = np.ones(k + 1) / (k + 1)
+    return cand, list(prob)
 
 
 if __name__ == "__main__":
