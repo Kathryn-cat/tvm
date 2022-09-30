@@ -57,6 +57,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     j0, j1 = sch.split(loop=j, factors=[None, 16])
     k0, k1 = sch.split(loop=k, factors=[None, 16])
     sch.reorder(i0, j0, k0, i1, j1, k1)
+    b_mm = sch.blockize(i1)
     """
     v1 = sch.sample_categorical(
         candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
@@ -64,7 +65,6 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     v2 = sch.sample_categorical(
         candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7, 1 / 7]
     )
-    b_mm = sch.blockize(i2)
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
     sch.bind(i1, "threadIdx.y")
@@ -155,7 +155,6 @@ def apply_trace(sch):
     l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
     l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
     sch.reorder(l16, l18, l13, l11, l9)
-    """
     b20 = sch.blockize(loop=l13)
     sch.annotate(
         block_or_loop=b20,
@@ -175,6 +174,7 @@ def apply_trace(sch):
     l29, l30, l31, l32, l33 = sch.split(
         loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
     )
+    """
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
         loop=l22, n=5, max_innermost_factor=4, decision=[2, 4, 2, 2, 2]
     )
