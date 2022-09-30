@@ -41,6 +41,9 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.i
 
 def schedule_matmul(sch: tir.Schedule) -> None:
     b_C = sch.get_block("C")
+    b_write_0 = sch.reindex(block=b_C, buffer=("write", 0)) # buffer for writing
+    b_read_0 = sch.reindex(block=b_C, buffer=("read", 0))
+    b_read_1 = sch.reindex(block=b_C, buffer=("read", 1))
     i, j, k = sch.get_loops(block=b_C)
     v1 = sch.sample_categorical(candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1/7, 1/7, 1/7, 1/7, 1/7, 1/7, 1/7])
     v2 = sch.sample_categorical(candidates=[1, 2, 4, 8, 16, 32, 64], probs=[1/7, 1/7, 1/7, 1/7, 1/7, 1/7, 1/7])
@@ -49,6 +52,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     k0, k1 = sch.split(loop=k, factors=[None, 16])
     sch.reorder(i0, j0, i1, j1, k0, i2, j2, k1)
     b_mm = sch.blockize(i2)
+    """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
     sch.bind(i1, "threadIdx.y")
@@ -67,12 +71,12 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.compute_at(block=A_local, loop=j1)
     sch.compute_at(block=B_local, loop=j1)
     sch.tensorize(block_or_loop=b_mm, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
+    """
 
 def apply_trace(sch):
   b0 = sch.get_block(name="C", func_name="main")
   b1 = sch.get_block(name="root", func_name="main")
   sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
-  """
   b2 = sch.reindex(block=b0, buffer=("write", 0))
   b3 = sch.reindex(block=b0, buffer=("read", 0))
   b4 = sch.reindex(block=b0, buffer=("read", 1))
@@ -96,6 +100,7 @@ def apply_trace(sch):
   l21, l22, l23 = sch.get_loops(block=b20)
   v24, v25, v26, v27, v28 = sch.sample_perfect_tile(loop=l21, n=5, max_innermost_factor=4, decision=[8, 2, 2, 1, 2])
   l29, l30, l31, l32, l33 = sch.split(loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True)
+  """
   v34, v35, v36, v37, v38 = sch.sample_perfect_tile(loop=l22, n=5, max_innermost_factor=4, decision=[2, 4, 2, 2, 2])
   l39, l40, l41, l42, l43 = sch.split(loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True)
   v44, v45, v46 = sch.sample_perfect_tile(loop=l23, n=3, max_innermost_factor=4, decision=[16, 4, 1])
@@ -238,7 +243,7 @@ if __name__ == "__main__":
         sch.mod.show()
         #matmul_mod = tvm.build(sch.mod, target="cuda")
     else:
-        sch = tvm.tir.Schedule(matmul)
+        sch = tvm.tir.Schedule(matmulStatic)
         apply_trace(sch)
         sch.mod.show()
 
