@@ -74,8 +74,8 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # split l_g3
     v1_g3 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
-    res = sch.sample_perfect_tile(loop=l_g3r, n=4, max_innermost_factor=4)
-    l_g32, l_g33, l_g34, l_g35 = sch.split(loop=l_g3r, factors=[*res])
+    res = sch.sample_perfect_tile(loop=l_g3r, n=2, max_innermost_factor=4)
+    l_g32, l_g33 = sch.split(loop=l_g3r, factors=[*res])
     """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
