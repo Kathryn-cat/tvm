@@ -87,7 +87,14 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.reverse_compute_at(C_shared, l_g2)
     C_local = sch.cache_write(b_mm, 0, "wmma.accumulator")
     sch.reverse_compute_at(C_local, l_g3)
-    # TODO: cooperative fetch for shared memory
+    # cooperative fetch for shared memory
+    cand, prob = categ(3)  # sample the vectorize size
+    _, _, _, l_s = sch.get_loops(block=C_shared)
+    v_s = sch.sample_categorical(candidates=cand, probs=prob)
+    l_s1, l_s2, l_s3, l_s4 = sch.split(loop=l_s, factors=[None, sch.get(l_g3).extent, 32, v_s])
+    sch.vectorize(loop=l_s4)
+    sch.bind(loop=l_s3, thread_axis="threadIdx.x")
+    sch.bind(loop=l_s2, thread_axis="threadIdx.y")
     # split loops for local memory caching when writing to align with tensor core
     _, _, _, l_l1, l_l2 = sch.get_loops(block=C_local)
     l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
@@ -117,10 +124,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
     l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
     sch.reorder(l_l21, l_l12)
-    """
-    b_local = sch.blockize(k0)
-    sch.tensorize(block_or_loop=b_mm, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
-    """
+    # unrolling
 
 
 def apply_trace(sch):
@@ -300,9 +304,10 @@ def apply_trace(sch):
     # )
     sch.compute_inline(block=b3)
     sch.compute_inline(block=b4)
-    """
+    # TODO: figure out buffer_dim_align
     sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
     sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
+    # TODO: unroll
     v135 = sch.sample_categorical(
         candidates=[0, 16, 64, 512, 1024],
         probs=[
@@ -324,6 +329,7 @@ def apply_trace(sch):
     sch.vectorize(loop=l143)
     sch.bind(loop=l142, thread_axis="threadIdx.x")
     sch.bind(loop=l141, thread_axis="threadIdx.y")
+    """
     sch.unannotate(block_or_loop=b73, ann_key="meta_schedule.cooperative_fetch")
     l144, l145, l146, l147, l148 = sch.get_loops(block=b73)
     l149, l150, l151, l152 = sch.split(
