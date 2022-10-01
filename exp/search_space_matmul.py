@@ -85,20 +85,16 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.bind(loop=l_g1, thread_axis="blockIdx.y")
     sch.bind(loop=l_g2, thread_axis="blockIdx.x")
     sch.bind(loop=l_g3, thread_axis="threadIdx.y")
+    C_shared = sch.cache_write(b_mm, 0, "shared")
+    sch.reverse_compute_at(C_shared, l_g2)
+    C_local = sch.cache_write(b_mm, 0, "wmma.accumulator")
+    sch.reverse_compute_at(C_local, l_g3)
     """
-    sch.bind(i0, "blockIdx.y")
-    sch.bind(j0, "blockIdx.x")
-    sch.bind(i1, "threadIdx.y")
-    b_shared = sch.blockize(j1)
-    C_shared = sch.cache_write(b_shared, 0, "shared")
-    sch.reverse_compute_at(C_shared, j0)
     A_shared = sch.cache_read(block=b_shared, read_buffer_index=0, storage_scope="shared")
     B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
     sch.compute_at(block=A_shared, loop=i1)
     sch.compute_at(block=B_shared, loop=i1)
     b_local = sch.blockize(k0)
-    C_local = sch.cache_write(b_local, 0, "wmma.accumulator")
-    sch.reverse_compute_at(C_local, j1)
     A_local = sch.cache_read(block=b_local, read_buffer_index=1, storage_scope="wmma.matrix_a")
     B_local = sch.cache_read(block=b_local, read_buffer_index=2, storage_scope="wmma.matrix_b")
     sch.compute_at(block=A_local, loop=j1)
@@ -216,11 +212,11 @@ def apply_trace(sch):
     # sch.annotate(
     #    block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     # )
-    """
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
     sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
+    """
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
