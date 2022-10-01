@@ -146,7 +146,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.tensorize(block_or_loop=l_ti, tensor_intrin="wmma_fill_16x16x16_f16")
     b_tc = sch.get_block("C")
     l_tc, _, _ = sch.get_loops(block=b_tc)
-    sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
+    sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
 
 
 def apply_trace(sch):
