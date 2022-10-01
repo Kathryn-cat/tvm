@@ -76,6 +76,15 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
     res = sch.sample_perfect_tile(loop=l_g3r, n=2, max_innermost_factor=4)
     l_g32, l_g33 = sch.split(loop=l_g3r, factors=[*res])
+    sch.reorder(
+        l_g11, l_g21, l_g12, l_g22, l_g13, l_g23, l_g31, l_g32, l_g14, l_g24, l_g33, l_g15, l_g25
+    )
+    l_g1 = sch.fuse(l_g11, l_g21)
+    l_g2 = sch.fuse(l_g12, l_g22)
+    l_g3 = sch.fuse(l_g13, l_g23)
+    sch.bind(loop=l_g1, thread_axis="blockIdx.y")
+    sch.bind(loop=l_g2, thread_axis="blockIdx.x")
+    sch.bind(loop=l_g3, thread_axis="threadIdx.y")
     """
     sch.bind(i0, "blockIdx.y")
     sch.bind(j0, "blockIdx.x")
@@ -196,7 +205,6 @@ def apply_trace(sch):
         loop=l23, n=3, max_innermost_factor=4, decision=[16, 4, 1]
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
-    """
     sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
     l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
     sch.bind(loop=l50, thread_axis="blockIdx.y")
@@ -204,10 +212,11 @@ def apply_trace(sch):
     sch.bind(loop=l51, thread_axis="blockIdx.x")
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
     sch.bind(loop=l52, thread_axis="threadIdx.y")
-    sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=32)
-    sch.annotate(
-        block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
-    )
+    # sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=32)
+    # sch.annotate(
+    #    block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
+    # )
+    """
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
     sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
