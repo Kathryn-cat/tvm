@@ -41,9 +41,6 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.i
 
 def schedule_matmul(sch: tir.Schedule) -> None:
     b_C = sch.get_block("C")
-    b_write_0 = sch.reindex(block=b_C, buffer=("write", 0))  # buffer for writing
-    b_read_0 = sch.reindex(block=b_C, buffer=("read", 0))
-    b_read_1 = sch.reindex(block=b_C, buffer=("read", 1))
     sch.transform_layout(
         block=b_C,
         buffer=("read", 1),
@@ -85,10 +82,12 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.bind(loop=l_g1, thread_axis="blockIdx.y")
     sch.bind(loop=l_g2, thread_axis="blockIdx.x")
     sch.bind(loop=l_g3, thread_axis="threadIdx.y")
+    # cache write
     C_shared = sch.cache_write(b_mm, 0, "shared")
     sch.reverse_compute_at(C_shared, l_g2)
     C_local = sch.cache_write(b_mm, 0, "wmma.accumulator")
     sch.reverse_compute_at(C_local, l_g3)
+    # TODO: cooperative fetch for shared memory
     """
     A_shared = sch.cache_read(block=b_shared, read_buffer_index=0, storage_scope="shared")
     B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
@@ -208,20 +207,21 @@ def apply_trace(sch):
     sch.bind(loop=l51, thread_axis="blockIdx.x")
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
     sch.bind(loop=l52, thread_axis="threadIdx.y")
-    # sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=32)
-    # sch.annotate(
-    #    block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
-    # )
+    sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=32)
+    sch.annotate(
+        block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
+    )
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
     sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
-    """
+    # TODO: add
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     sch.reverse_compute_inline(block=b2)
+    """
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
