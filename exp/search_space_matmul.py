@@ -141,8 +141,9 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_Co = sch.get_block("C_o")
     sch.decompose_reduction(block=b_Co, loop=l_g31)
     # tensorization
-    b_Ci = sch.get_block("C_o_init")
-    sch.tensorize(block_or_loop=b_Ci, tensor_intrin="wmma_fill_16x16x16_f16")
+    b_ti = sch.get_block("C_init")
+    l_ti, _ = sch.get_loops(block=b_ti)
+    sch.tensorize(block_or_loop=l_ti, tensor_intrin="wmma_fill_16x16x16_f16")
 
 
 def apply_trace(sch):
@@ -386,7 +387,6 @@ def apply_trace(sch):
     b222 = sch.get_block(name="C_o", func_name="main")
     l223, l224, l225, l226, l227, l228, l229, l230, l231, l232 = sch.get_loops(block=b222)
     b233 = sch.decompose_reduction(block=b222, loop=l226)
-    """
     sch.unannotate(block_or_loop=b233, ann_key="meta_schedule.auto_tensorize")
     sch.annotate(
         block_or_loop=b233, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_fill_16x16x16_f16"
@@ -396,6 +396,7 @@ def apply_trace(sch):
     b234 = sch.get_block(name="C_o_init", func_name="main")
     sch.unannotate(block_or_loop=b234, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b234, tensor_intrin="wmma_fill_16x16x16_f16")
+    """
     b235 = sch.get_block(name="A_reindex_shared_wmma.matrix_a_o", func_name="main")
     sch.unannotate(block_or_loop=b235, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b235, tensor_intrin="wmma_load_16x16x16_f16_a")
