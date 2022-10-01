@@ -104,12 +104,21 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     _, _, _, _, l_s21, l_s22 = sch.get_loops(B_shared)
     l_s2f = sch.fuse(l_s21, l_s22)
     # TODO: cooperative fetch for shared memory
+    A_local = sch.cache_read(block=b_mm, read_buffer_index=0, storage_scope="wmma.matrix_a")
+    B_local = sch.cache_read(block=b_mm, read_buffer_index=1, storage_scope="wmma.matrix_b")
+    sch.compute_at(block=A_local, loop=l_g32)
+    sch.compute_at(block=B_local, loop=l_g32)
+    # split loops for local memory caching when reading to align with tensor core
+    _, _, _, _, _, l_l1, l_l2 = sch.get_loops(block=A_local)
+    l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
+    l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
+    sch.reorder(l_l21, l_l12)
+    _, _, _, _, _, l_l1, l_l2 = sch.get_loops(block=B_local)
+    l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
+    l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
+    sch.reorder(l_l21, l_l12)
     """
     b_local = sch.blockize(k0)
-    A_local = sch.cache_read(block=b_local, read_buffer_index=1, storage_scope="wmma.matrix_a")
-    B_local = sch.cache_read(block=b_local, read_buffer_index=2, storage_scope="wmma.matrix_b")
-    sch.compute_at(block=A_local, loop=j1)
-    sch.compute_at(block=B_local, loop=j1)
     sch.tensorize(block_or_loop=b_mm, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
     """
 
@@ -263,7 +272,6 @@ def apply_trace(sch):
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch", ann_val=v90)
-    """
     b91 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="wmma.matrix_a")
     sch.compute_at(block=b91, loop=l48, preserve_unit_loops=True, index=-1)
     l92, l93, l94, l95, l96, l97, l98 = sch.get_loops(block=b91)
@@ -272,7 +280,11 @@ def apply_trace(sch):
     l103, l104, l105, l106, l107, l108, l109, l110, l111 = sch.get_loops(block=b91)
     sch.reorder(l110, l102, l100)
     # b112 = sch.blockize(loop=l102)
-    # sch.annotate(block_or_loop=b112, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_load_16x16x16_f16_a")
+    # sch.annotate(
+    #    block_or_loop=b112,
+    #    ann_key="meta_schedule.auto_tensorize",
+    #    ann_val="wmma_load_16x16x16_f16_a",
+    # )
     b113 = sch.cache_read(block=b20, read_buffer_index=1, storage_scope="wmma.matrix_b")
     sch.compute_at(block=b113, loop=l48, preserve_unit_loops=True, index=-1)
     l114, l115, l116, l117, l118, l119, l120 = sch.get_loops(block=b113)
@@ -281,9 +293,14 @@ def apply_trace(sch):
     l125, l126, l127, l128, l129, l130, l131, l132, l133 = sch.get_loops(block=b113)
     sch.reorder(l132, l124, l122)
     # b134 = sch.blockize(loop=l124)
-    # sch.annotate(block_or_loop=b134, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_load_16x16x16_f16_b")
+    # sch.annotate(
+    #    block_or_loop=b134,
+    #    ann_key="meta_schedule.auto_tensorize",
+    #    ann_val="wmma_load_16x16x16_f16_b",
+    # )
     sch.compute_inline(block=b3)
     sch.compute_inline(block=b4)
+    """
     sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
     sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
     v135 = sch.sample_categorical(
