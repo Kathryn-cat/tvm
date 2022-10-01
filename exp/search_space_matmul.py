@@ -93,11 +93,18 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
     l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
     sch.reorder(l_l21, l_l12)
+    # cache read
+    A_shared = sch.cache_read(block=b_mm, read_buffer_index=0, storage_scope="shared")
+    B_shared = sch.cache_read(block=b_mm, read_buffer_index=1, storage_scope="shared")
+    sch.compute_at(block=A_shared, loop=l_g31)
+    sch.compute_at(block=B_shared, loop=l_g31)
+    # fusion for scheduling cooperative fetch
+    _, _, _, _, l_s11, l_s12 = sch.get_loops(A_shared)
+    l_s1f = sch.fuse(l_s11, l_s12)
+    _, _, _, _, l_s21, l_s22 = sch.get_loops(B_shared)
+    l_s2f = sch.fuse(l_s21, l_s22)
+    # TODO: cooperative fetch for shared memory
     """
-    A_shared = sch.cache_read(block=b_shared, read_buffer_index=0, storage_scope="shared")
-    B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
-    sch.compute_at(block=A_shared, loop=i1)
-    sch.compute_at(block=B_shared, loop=i1)
     b_local = sch.blockize(k0)
     A_local = sch.cache_read(block=b_local, read_buffer_index=1, storage_scope="wmma.matrix_a")
     B_local = sch.cache_read(block=b_local, read_buffer_index=2, storage_scope="wmma.matrix_b")
@@ -231,13 +238,18 @@ def apply_trace(sch):
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
     l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
-    """
-    # b72 = sch.blockize(loop=l64)
-    # sch.annotate(block_or_loop=b72, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_store_16x16x16_f16_shared")
+    # TODO: not used
+    b72 = sch.blockize(loop=l64)
+    sch.annotate(
+        block_or_loop=b72,
+        ann_key="meta_schedule.auto_tensorize",
+        ann_val="wmma_store_16x16x16_f16_shared",
+    )
     b73 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="shared")
     sch.compute_at(block=b73, loop=l47, preserve_unit_loops=True, index=-1)
     l74, l75, l76, l77, l78, l79 = sch.get_loops(block=b73)
     l80 = sch.fuse(l78, l79, preserve_unit_iters=True)
+    # TODO: add
     v81 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=3
     )
@@ -246,10 +258,12 @@ def apply_trace(sch):
     sch.compute_at(block=b82, loop=l47, preserve_unit_loops=True, index=-1)
     l83, l84, l85, l86, l87, l88 = sch.get_loops(block=b82)
     l89 = sch.fuse(l87, l88, preserve_unit_iters=True)
+    # TODO: add
     v90 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch", ann_val=v90)
+    """
     b91 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="wmma.matrix_a")
     sch.compute_at(block=b91, loop=l48, preserve_unit_loops=True, index=-1)
     l92, l93, l94, l95, l96, l97, l98 = sch.get_loops(block=b91)
