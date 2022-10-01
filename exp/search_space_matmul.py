@@ -88,6 +88,10 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     C_local = sch.cache_write(b_mm, 0, "wmma.accumulator")
     sch.reverse_compute_at(C_local, l_g3)
     # TODO: cooperative fetch for shared memory
+    # split loops for local memory caching when writing to align with tensor core
+    _, _, _, l_l1, l_l2 = sch.get_loops(block=C_local)
+    l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
+    l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
     """
     A_shared = sch.cache_read(block=b_shared, read_buffer_index=0, storage_scope="shared")
     B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
@@ -221,10 +225,10 @@ def apply_trace(sch):
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     sch.reverse_compute_inline(block=b2)
-    """
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
+    """
     l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
     # b72 = sch.blockize(loop=l64)
