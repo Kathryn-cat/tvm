@@ -147,6 +147,9 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_tc = sch.get_block("C")
     l_tc, _, _ = sch.get_loops(block=b_tc)
     sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
+    b_ts = sch.get_block("C_shared_wmma.accumulator")
+    _, _, _, _, _, l_ts, _ = sch.get_loops(block=b_ts)
+    sch.tensorize(block_or_loop=l_ts, tensor_intrin="wmma_store_16x16x16_f16_shared")
 
 
 def apply_trace(sch):
@@ -410,11 +413,9 @@ def apply_trace(sch):
     b237 = sch.get_block(name="C_o_update", func_name="main")
     sch.unannotate(block_or_loop=b237, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b237, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
-    """
     b238 = sch.get_block(name="C_reindex_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
-    """
 
 
 def categ(k):
