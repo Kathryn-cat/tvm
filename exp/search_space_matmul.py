@@ -92,6 +92,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     _, _, _, l_l1, l_l2 = sch.get_loops(block=C_local)
     l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
     l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
+    sch.reorder(l_l21, l_l12)
     """
     A_shared = sch.cache_read(block=b_shared, read_buffer_index=0, storage_scope="shared")
     B_shared = sch.cache_read(block=b_shared, read_buffer_index=1, storage_scope="shared")
@@ -228,9 +229,9 @@ def apply_trace(sch):
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
-    """
     l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
+    """
     # b72 = sch.blockize(loop=l64)
     # sch.annotate(block_or_loop=b72, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_store_16x16x16_f16_shared")
     b73 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="shared")
