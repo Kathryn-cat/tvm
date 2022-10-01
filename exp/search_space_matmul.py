@@ -123,7 +123,6 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.vectorize(loop=l_s4)
     sch.bind(loop=l_s3, thread_axis="threadIdx.x")
     sch.bind(loop=l_s2, thread_axis="threadIdx.y")
-
     A_local = sch.cache_read(block=b_mm, read_buffer_index=0, storage_scope="wmma.matrix_a")
     B_local = sch.cache_read(block=b_mm, read_buffer_index=1, storage_scope="wmma.matrix_b")
     sch.compute_at(block=A_local, loop=l_g32)
@@ -140,7 +139,10 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # unrolling max step
     # decompose reduction
     b_Co = sch.get_block("C_o")
-    b_Ci = sch.decompose_reduction(block=b_Co, loop=l_g31)
+    sch.decompose_reduction(block=b_Co, loop=l_g31)
+    # tensorization
+    b_Ci = sch.get_block("C_o_init")
+    sch.tensorize(block_or_loop=b_Ci, tensor_intrin="wmma_fill_16x16x16_f16")
 
 
 def apply_trace(sch):
@@ -266,7 +268,6 @@ def apply_trace(sch):
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
     l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
-    # TODO: not used
     b72 = sch.blockize(loop=l64)
     sch.annotate(
         block_or_loop=b72,
