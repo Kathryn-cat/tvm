@@ -137,7 +137,10 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     l_l11, l_l12 = sch.split(loop=l_l1, factors=[None, 16])
     l_l21, l_l22 = sch.split(loop=l_l2, factors=[None, 16])
     sch.reorder(l_l21, l_l12)
-    # unrolling
+    # unrolling max step
+    # decompose reduction
+    b_Co = sch.get_block("C_o")
+    b_Ci = sch.decompose_reduction(block=b_Co, loop=l_g31)
 
 
 def apply_trace(sch):
@@ -293,12 +296,12 @@ def apply_trace(sch):
     l101, l102 = sch.split(loop=l97, factors=[None, 16], preserve_unit_iters=True)
     l103, l104, l105, l106, l107, l108, l109, l110, l111 = sch.get_loops(block=b91)
     sch.reorder(l110, l102, l100)
-    # b112 = sch.blockize(loop=l102)
-    # sch.annotate(
-    #    block_or_loop=b112,
-    #    ann_key="meta_schedule.auto_tensorize",
-    #    ann_val="wmma_load_16x16x16_f16_a",
-    # )
+    b112 = sch.blockize(loop=l102)
+    sch.annotate(
+        block_or_loop=b112,
+        ann_key="meta_schedule.auto_tensorize",
+        ann_val="wmma_load_16x16x16_f16_a",
+    )
     b113 = sch.cache_read(block=b20, read_buffer_index=1, storage_scope="wmma.matrix_b")
     sch.compute_at(block=b113, loop=l48, preserve_unit_loops=True, index=-1)
     l114, l115, l116, l117, l118, l119, l120 = sch.get_loops(block=b113)
@@ -306,12 +309,12 @@ def apply_trace(sch):
     l123, l124 = sch.split(loop=l119, factors=[None, 16], preserve_unit_iters=True)
     l125, l126, l127, l128, l129, l130, l131, l132, l133 = sch.get_loops(block=b113)
     sch.reorder(l132, l124, l122)
-    # b134 = sch.blockize(loop=l124)
-    # sch.annotate(
-    #    block_or_loop=b134,
-    #    ann_key="meta_schedule.auto_tensorize",
-    #    ann_val="wmma_load_16x16x16_f16_b",
-    # )
+    b134 = sch.blockize(loop=l124)
+    sch.annotate(
+        block_or_loop=b134,
+        ann_key="meta_schedule.auto_tensorize",
+        ann_val="wmma_load_16x16x16_f16_b",
+    )
     sch.compute_inline(block=b3)
     sch.compute_inline(block=b4)
     # TODO: figure out buffer_dim_align
@@ -355,7 +358,6 @@ def apply_trace(sch):
     sch.vectorize(loop=l161)
     sch.bind(loop=l160, thread_axis="threadIdx.x")
     sch.bind(loop=l159, thread_axis="threadIdx.y")
-    """
     b162 = sch.get_block(name="root", func_name="main")
     sch.unannotate(block_or_loop=b162, ann_key="meta_schedule.unroll_explicit")
     b163, b164, b165, b166, b167, b168, b169 = sch.get_child_blocks(b162)
@@ -383,6 +385,7 @@ def apply_trace(sch):
     b222 = sch.get_block(name="C_o", func_name="main")
     l223, l224, l225, l226, l227, l228, l229, l230, l231, l232 = sch.get_loops(block=b222)
     b233 = sch.decompose_reduction(block=b222, loop=l226)
+    """
     sch.unannotate(block_or_loop=b233, ann_key="meta_schedule.auto_tensorize")
     sch.annotate(
         block_or_loop=b233, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_fill_16x16x16_f16"
