@@ -18,6 +18,12 @@ def test_split_symbolic():
     block_b = sch.get_block("B")
     _, j = sch.get_loops(block_b)
     sch.split(j, factors=[16, None])
+    i1, i2, i3 = sch.get_loops(block_b)
+    sch.bind(loop=i1, thread_axis="blockIdx.y")
+    sch.bind(loop=i2, thread_axis="blockIdx.x")
+    sch.bind(loop=i3, thread_axis="threadIdx.y")
+    block_shared = sch.cache_write(block_b, 0, "shared")
+    sch.reverse_compute_at(block_shared, i2)
     print(sch.mod.script())
 
 
