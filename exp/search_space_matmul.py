@@ -28,10 +28,10 @@ def matmulStatic(a: T.handle, b: T.handle, c: T.handle) -> None:
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (16 * m, 16 * n), "float16")
-    B = T.match_buffer(b, (16 * n, 16 * p), "float16")
-    C = T.match_buffer(c, (16 * m, 16 * p), "float16")
-    for i, j, k in T.grid(16 * m, 16 * n, 16 * p):
+    A = T.match_buffer(a, (4096 * m, 4096 * n), "float16")
+    B = T.match_buffer(b, (4096 * n, 4096 * p), "float16")
+    C = T.match_buffer(c, (4096 * m, 4096 * p), "float16")
+    for i, j, k in T.grid(4096 * m, 4096 * n, 4096 * p):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -149,7 +149,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
     b_ts = sch.get_block("C_shared_wmma.accumulator")
     _, _, _, _, _, l_ts, _ = sch.get_loops(block=b_ts)
-    sch.tensorize(block_or_loop=l_ts, tensor_intrin="wmma_store_16x16x16_f16_shared")
+    # sch.tensorize(block_or_loop=l_ts, tensor_intrin="wmma_store_16x16x16_f16_shared")
 
 
 def apply_trace(sch):
