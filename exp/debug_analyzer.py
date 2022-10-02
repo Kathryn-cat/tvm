@@ -17,8 +17,7 @@ def test_split_symbolic():
     sch = tir.Schedule(elementwise_symbolic, debug_mask="all")
     block_b = sch.get_block("B")
     _, j = sch.get_loops(block_b)
-    v = IntImm(dtype="int64", value=16)
-    sch.split(j, factors=[v, None])
+    sch.split(j, factors=[16, None])
     print(sch.mod.script())
 
 
@@ -58,6 +57,10 @@ def test_subspace_division():
     tvm.ir.assert_structural_equal(res[0][1], x + c)
 
 
+def test_predicate1():
+    pass
+
+
 if __name__ == "__main__":
-    # test_split_symbolic()
+    test_split_symbolic()
     test_subspace_division()
