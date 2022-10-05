@@ -110,9 +110,9 @@ def test_symbolic_6():
     sch.split(j, factors=[16, None])
     i1, i2, i3, i4 = sch.get_loops(block_b)
     # can't blockize after reordering
-    sch.reorder(i2, i4, i1, i3)
+    # sch.reorder(i2, i4, i1, i3) # bad
     # sch.reorder(i1, i3, i2, i4)  # ok
-    # sch.reorder(i3, i2, i1, i4)  # bad
+    sch.reorder(i2, i3, i1, i4)  # bad
     i1, i2, i3, i4 = sch.get_loops(block_b)
     sch.blockize(i3)
     sch.mod.show()
