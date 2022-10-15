@@ -438,11 +438,12 @@ if __name__ == "__main__":
         sch = tvm.tir.Schedule(matmul)
         schedule_matmul(sch)
         sch.mod.show()
-        # matmul_mod = tvm.build(sch.mod, target="cuda")
+        matmul_mod = tvm.build(sch.mod, target="cuda")
     else:
         sch = tvm.tir.Schedule(matmulStatic)
         apply_trace(sch)
         sch.mod.show()
+        matmul_mod = tvm.build(sch.mod, target="cuda")
 
     """
     print("tensor intrinsic:")
