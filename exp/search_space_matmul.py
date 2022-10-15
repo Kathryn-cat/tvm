@@ -7,6 +7,7 @@ from tvm import meta_schedule as ms
 from tvm import tir
 from tvm.script import tir as T
 from tvm.tir.tensor_intrin import cuda as _
+from tvm.tir.tensor_intrin.cuda import get_wmma_store_intrin
 
 
 # fixed shape matmul
@@ -402,14 +403,12 @@ def apply_trace(sch):
     b234 = sch.get_block(name="C_o_init", func_name="main")
     sch.unannotate(block_or_loop=b234, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b234, tensor_intrin="wmma_fill_16x16x16_f16")
-    """
     b235 = sch.get_block(name="A_reindex_shared_wmma.matrix_a_o", func_name="main")
     sch.unannotate(block_or_loop=b235, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b235, tensor_intrin="wmma_load_16x16x16_f16_a")
     b236 = sch.get_block(name="B_reindex_shared_wmma.matrix_b_o", func_name="main")
     sch.unannotate(block_or_loop=b236, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b236, tensor_intrin="wmma_load_16x16x16_f16_b")
-    """
     b237 = sch.get_block(name="C_o_update", func_name="main")
     sch.unannotate(block_or_loop=b237, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b237, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
@@ -441,6 +440,10 @@ if __name__ == "__main__":
         sch = tvm.tir.Schedule(matmulStatic)
         apply_trace(sch)
         sch.mod.show()
+
+    print("tensor intrinsic:")
+    res = get_wmma_store_intrin(16, 16, 16, "float16", "shared")
+    res[0].show()
 
     """
     # evaluate the running time
