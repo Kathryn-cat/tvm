@@ -104,6 +104,17 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
   static std::unordered_map<Buffer, Region, ObjectPtrHash, ObjectPtrEqual> Collect(
       const PrimFunc& f) {
     BufferAccessRegionCollector collector;
+    arith::Analyzer* analyzer = &collector.dom_analyzer_;
+    for (auto& item : f->buffer_map) {
+      for (auto& expr : item.second->shape) {
+        PostOrderVisit(expr, [analyzer](const ObjectRef& obj) {
+          if (obj->IsInstance<VarNode>()) {
+            analyzer->Bind(GetRef<Var>(obj.as<VarNode>()),
+                           Range::FromMinExtent(Integer(1), Integer(5)), false);
+          }
+        });
+      }
+    }
     collector(f->body);
     return std::move(collector.buffer_access_region_);
   }
@@ -601,6 +612,8 @@ namespace transform {
 
 Pass CompactBufferAllocation() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
+    // LOG(INFO) << "compact-buffer-region:\n" <<
+    // AsTVMScript(CompactBufferAllocation(std::move(f)));
     return CompactBufferAllocation(std::move(f));
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.CompactBufferAllocation", {});
