@@ -62,27 +62,29 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
-    res = sch.sample_perfect_tile(loop=l_g1r, n=3, max_innermost_factor=4)
-    l_g12, l_g13, l_g14 = sch.split(loop=l_g1r, factors=[*res])
+    res = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
+    l_g11_1, l_g12, l_g13, l_g14 = sch.split(loop=l_g1r, factors=[*res])
     # split l_g2
     v1_g2 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
-    res = sch.sample_perfect_tile(loop=l_g2r, n=3, max_innermost_factor=4)
-    l_g22, l_g23, l_g24 = sch.split(loop=l_g2r, factors=[*res])
+    res = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
+    l_g21_1, l_g22, l_g23, l_g24 = sch.split(loop=l_g2r, factors=[*res])
     # split l_g3
     v1_g3 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
     res = sch.sample_perfect_tile(loop=l_g3r, n=2, max_innermost_factor=4)
     l_g32, l_g33 = sch.split(loop=l_g3r, factors=[*res])
     # only l_g11, l_g21, l_g31 are dynamic loops
-    sch.reorder(l_g11, l_g21, l_g12, l_g22, l_g31, l_g32, l_g13, l_g23, l_g33, l_g14, l_g24)
+    sch.reorder(l_g11, l_g21_1, l_g11_1, l_g21, l_g12, l_g22, l_g31, l_g32, l_g13, l_g23, l_g33, l_g14, l_g24)
+    l_g1 = sch.fuse(l_g11, l_g21_1)
+    l_g2 = sch.fuse(l_g11_1, l_g21)
     l_g3 = sch.fuse(l_g12, l_g22)
-    sch.bind(loop=l_g11, thread_axis="blockIdx.y")
-    sch.bind(loop=l_g21, thread_axis="blockIdx.x")
+    sch.bind(loop=l_g1, thread_axis="blockIdx.y")
+    sch.bind(loop=l_g2, thread_axis="blockIdx.x")
     sch.bind(loop=l_g3, thread_axis="threadIdx.y")
     # cache write
     C_shared = sch.cache_write(b_mm, 0, "shared")
-    sch.reverse_compute_at(C_shared, l_g21)
+    sch.reverse_compute_at(C_shared, l_g2)
     C_local = sch.cache_write(b_mm, 0, "wmma.accumulator")
     sch.reverse_compute_at(C_local, l_g3)
     # cooperative fetch for shared memory
@@ -438,7 +440,7 @@ if __name__ == "__main__":
         sch = tvm.tir.Schedule(matmul)
         schedule_matmul(sch)
         sch.mod.show()
-        matmul_mod = tvm.build(sch.mod, target="cuda")
+        # matmul_mod = tvm.build(sch.mod, target="cuda")
     else:
         sch = tvm.tir.Schedule(matmulStatic)
         apply_trace(sch)
