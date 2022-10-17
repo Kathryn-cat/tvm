@@ -109,8 +109,8 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
       for (auto& expr : item.second->shape) {
         PostOrderVisit(expr, [analyzer](const ObjectRef& obj) {
           if (obj->IsInstance<VarNode>()) {
-            analyzer->Bind(GetRef<Var>(obj.as<VarNode>()),
-                           Range::FromMinExtent(Integer(1), Integer(5)), false);
+            const Var& var = GetRef<Var>(obj.as<VarNode>());
+            analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
           }
         });
       }
