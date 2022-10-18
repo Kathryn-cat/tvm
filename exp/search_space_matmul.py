@@ -463,51 +463,6 @@ if __name__ == "__main__":
             print("built IR successfully")
             # evaluate the running time
             dev = tvm.cuda(0)
-            A_np = np.random.uniform(size=(4096, 4096)).astype("float16")
-            B_np = np.random.uniform(size=(4096, 4096)).astype("float16")
-            A_nd = tvm.nd.array(A_np, dev)
-            B_nd = tvm.nd.array(B_np, dev)
-            C_nd = tvm.nd.array(np.zeros((4096, 4096), dtype="float16"), dev)
-            device = torch.device('cuda:0')
-            C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
-            print(f"C_np: {C_np}")
-            matmul_mod(A_nd, B_nd, C_nd, 4, 4, 4)
-            print(f"C_nd: {C_nd}")
-            """
-            np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd)
-            print("calculation is correct")
-            num_flop = 2 * 1024 * 1024 * 1024
-            evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
-            print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1, 1, 1).mean / 1e9))
-            """
-
-        else:
-            print("memory invalid, stop building")
-    else:
-        sch = tvm.tir.Schedule(matmulStatic)
-        apply_trace(sch)
-        sch.mod.show()
-        target = tvm.target.Target("nvidia/geforce-rtx-3090")
-        def postprocs() -> List[Postproc]:
-            return [
-                ms.postproc.VerifyGPUCode(),
-            ]
-        ctx = ms.TuneContext(
-            mod=sch.mod,
-            target=target,
-            space_generator=ms.space_generator.PostOrderApply(),
-            postprocs=postprocs(),
-            task_name="test",
-        )
-
-        tmp_sch = tvm.tir.Schedule(sch.mod, debug_mask="all")
-        memory_valid = ctx.postprocs[0].apply(tmp_sch)
-        if memory_valid:
-            print("memory valid, begin building")
-            matmul_mod = tvm.build(sch.mod, target="cuda")
-            print("built IR successfully")
-            # evaluate the running time
-            dev = tvm.cuda(0)
             A_np = np.random.uniform(size=(1024, 1024)).astype("float16")
             B_np = np.random.uniform(size=(1024, 1024)).astype("float16")
             A_nd = tvm.nd.array(A_np, dev)
@@ -516,7 +471,7 @@ if __name__ == "__main__":
             device = torch.device('cuda:0')
             C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
             print(f"C_np: {C_np}")
-            matmul_mod(A_nd, B_nd, C_nd)
+            matmul_mod(A_nd, B_nd, C_nd, 1, 1, 1)
             print(f"C_nd: {C_nd}")
             """
             np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd)
@@ -528,6 +483,43 @@ if __name__ == "__main__":
 
         else:
             print("memory invalid, stop building")
+
+    sch = tvm.tir.Schedule(matmulStatic)
+    apply_trace(sch)
+    # sch.mod.show()
+    target = tvm.target.Target("nvidia/geforce-rtx-3090")
+    def postprocs() -> List[Postproc]:
+        return [
+            ms.postproc.VerifyGPUCode(),
+        ]
+    ctx = ms.TuneContext(
+        mod=sch.mod,
+        target=target,
+        space_generator=ms.space_generator.PostOrderApply(),
+        postprocs=postprocs(),
+        task_name="test",
+    )
+
+    tmp_sch = tvm.tir.Schedule(sch.mod, debug_mask="all")
+    memory_valid = ctx.postprocs[0].apply(tmp_sch)
+    print("memory valid, begin building")
+    matmul_mod = tvm.build(sch.mod, target="cuda")
+    print("built IR successfully")
+    # evaluate the running time
+    dev = tvm.cuda(0)
+    C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+    device = torch.device('cuda:0')
+    C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
+    print(f"C_np: {C_np}")
+    matmul_mod(A_nd, B_nd, C_nd)
+    print(f"C_nd: {C_nd}")
+    """
+    np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd)
+    print("calculation is correct")
+    num_flop = 2 * 1024 * 1024 * 1024
+    evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
+    print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1, 1, 1).mean / 1e9))
+    """
 
     """
     print("tensor intrinsic:")
