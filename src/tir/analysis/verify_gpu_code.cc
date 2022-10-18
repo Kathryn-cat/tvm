@@ -92,8 +92,9 @@ class GPUCodeVerifier : public StmtExprVisitor {
 
       Var var = op->node.as<IterVarNode>()->var;
       const auto* extent = op->value.as<IntImmNode>();
-      LOG(INFO) << "var: " << var << " op->value: " << op->value;
-      ICHECK(extent);
+      // LOG(INFO) << "var: " << var << " op->value: " << op->value;
+      // TODO: block size can be dynamic, but thread size must be integers
+      // ICHECK(extent);
 
       std::string name = var.get()->name_hint;
       // record the number of threads in a block
