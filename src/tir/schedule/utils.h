@@ -443,7 +443,7 @@ inline String BufferIndexType2Str(BufferIndexType buffer_index_type) {
 }
 
 inline void BindVar2Analyzer(arith::Analyzer* analyzer, IRModule mod) {
-  std::set<String> bindVars;
+  std::map<String, const Var> bindVars;
   for (const auto& pair : mod->functions) {
     if (const PrimFuncNode* prim_func = pair.second.as<PrimFuncNode>()) {
       for (auto& item : prim_func->buffer_map) {
@@ -453,7 +453,7 @@ inline void BindVar2Analyzer(arith::Analyzer* analyzer, IRModule mod) {
               const Var& var = GetRef<Var>(obj.as<VarNode>());
               if (bindVars.find(var->name_hint) == bindVars.end()) {
                 analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
-                bindVars.insert(var->name_hint);
+                bindVars.insert({var->name_hint, var});
               }
             }
           });
@@ -461,6 +461,10 @@ inline void BindVar2Analyzer(arith::Analyzer* analyzer, IRModule mod) {
       }
     }
   }
+  // bind n <= p constraint
+  const Var& var_n = bindVars.find("n")->second;
+  const Var& var_p = bindVars.find("p")->second;
+  analyzer->Bind(var_n, Range::FromMinExtent(Integer(1), var_p + Integer(1)), true);
 }
 
 }  // namespace tir
