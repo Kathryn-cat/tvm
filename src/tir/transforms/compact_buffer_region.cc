@@ -105,12 +105,16 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
       const PrimFunc& f) {
     BufferAccessRegionCollector collector;
     arith::Analyzer* analyzer = &collector.dom_analyzer_;
+    std::map<String, const Var> bindVars;
     for (auto& item : f->buffer_map) {
       for (auto& expr : item.second->shape) {
-        PostOrderVisit(expr, [analyzer](const ObjectRef& obj) {
+        PostOrderVisit(expr, [analyzer, &bindVars](const ObjectRef& obj) {
           if (obj->IsInstance<VarNode>()) {
             const Var& var = GetRef<Var>(obj.as<VarNode>());
-            analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
+            if (bindVars.find(var->name_hint) == bindVars.end()) {
+              analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
+              bindVars.insert({var->name_hint, var});
+            }
           }
         });
       }
