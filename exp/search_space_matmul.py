@@ -1,4 +1,5 @@
 import argparse
+from typing import List
 
 import numpy as np
 
@@ -8,6 +9,7 @@ from tvm import tir
 from tvm.script import tir as T
 from tvm.tir.tensor_intrin import cuda as _
 from tvm.tir.tensor_intrin.cuda import get_wmma_store_intrin
+from tvm.meta_schedule.postproc import Postproc
 
 
 # fixed shape matmul
@@ -440,12 +442,51 @@ if __name__ == "__main__":
         sch = tvm.tir.Schedule(matmul)
         schedule_matmul(sch)
         sch.mod.show()
-        matmul_mod = tvm.build(sch.mod, target="cuda")
+        target = tvm.target.Target("nvidia/geforce-rtx-3090")
+        def postprocs() -> List[Postproc]:
+            return [
+                ms.postproc.VerifyGPUCode(),
+            ]
+        ctx = ms.TuneContext(
+            mod=sch.mod,
+            target=target,
+            space_generator=ms.space_generator.PostOrderApply(),
+            postprocs=postprocs(),
+            task_name="test",
+        )
+        tmp_sch = tvm.tir.Schedule(sch.mod, debug_mask="all")
+        memory_valid = ctx.postprocs[0].apply(tmp_sch)
+        if memory_valid:
+            print("memory valid, begin building")
+            matmul_mod = tvm.build(sch.mod, target="cuda")
+            print("built IR successfully")
+        else:
+            print("memory invalid, stop building")
     else:
         sch = tvm.tir.Schedule(matmulStatic)
         apply_trace(sch)
         sch.mod.show()
-        matmul_mod = tvm.build(sch.mod, target="cuda")
+        target = tvm.target.Target("nvidia/geforce-rtx-3090")
+        def postprocs() -> List[Postproc]:
+            return [
+                ms.postproc.VerifyGPUCode(),
+            ]
+        ctx = ms.TuneContext(
+            mod=sch.mod,
+            target=target,
+            space_generator=ms.space_generator.PostOrderApply(),
+            postprocs=postprocs(),
+            task_name="test",
+        )
+
+        tmp_sch = tvm.tir.Schedule(sch.mod, debug_mask="all")
+        memory_valid = ctx.postprocs[0].apply(tmp_sch)
+        if memory_valid:
+            print("memory valid, begin building")
+            matmul_mod = tvm.build(sch.mod, target="cuda")
+            print("built IR successfully")
+        else:
+            print("memory invalid, stop building")
 
     """
     print("tensor intrinsic:")
