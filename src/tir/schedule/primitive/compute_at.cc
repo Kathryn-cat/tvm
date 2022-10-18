@@ -257,6 +257,8 @@ class ScopeReconstructor : private StmtMutator {
     loop_extents.reserve(n_iters);
     iter_values.reserve(n_iters);
     PrimExpr predicate = const_true();
+    DataType dtype = iter_doms[0].dom.CoverRange(block_->iter_vars[0]->dom)->extent.dtype();
+    PrimExpr upper_iter = make_const(dtype, 1);
     for (int i = 0; i < n_iters; ++i) {
       Range iter_dom = iter_doms[i].dom.CoverRange(block_->iter_vars[i]->dom);
       if (preserve_unit_loops || !is_one(iter_dom->extent)) {
@@ -269,15 +271,25 @@ class ScopeReconstructor : private StmtMutator {
       } else {
         iter_values.push_back(iter_dom->min);
       }
+      // TODO: check the correct way to multiply loops
+      // upper_iter = upper_iter * iter_dom->extent;
       const arith::IntSet& pred_bound = iter_doms[i].bound;
       if (!pred_bound.IsNothing()) {
         if (pred_bound.HasLowerBound()) {
           PrimExpr lower_bound = iter_values[i] >= pred_bound.min();
-          predicate = predicate && lower_bound;
+          // TODO: comment out because it's trivially true and we cannot find better ways to hack
+          // around it
+          // predicate = predicate && lower_bound;
         }
         if (pred_bound.HasUpperBound()) {
           PrimExpr upper_bound = iter_values[i] < pred_bound.max() + 1;
-          predicate = predicate && upper_bound;
+          if (!analyzer->CanProve(upper_iter == pred_bound.max() + 1)) {
+            // TODO: comment out because it's trivially true and we cannot find better ways to hack
+            // around it
+            // LOG(INFO) << "upper_iter: " << upper_iter;
+            // LOG(INFO) << "pred_bound.max() + 1: " << pred_bound.max() + 1;
+            // predicate = predicate && upper_bound;
+          }
         }
       }
     }
