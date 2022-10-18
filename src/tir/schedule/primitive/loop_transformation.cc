@@ -432,7 +432,7 @@ Array<StmtSRef> Split(ScheduleState self, const StmtSRef& loop_sref, const Array
       &opaque_block_reuse)(std::move(new_stmt));
   // Step 3. Update predicate to guard the loop
   PrimExpr predicate = substitute_value < loop->extent;
-  BindVar2Analyzer(&analyzer, self->mod);
+  // BindVar2Analyzer(&analyzer, self->mod);
   if (!analyzer.CanProve(upper_bound == loop->extent)) {
     new_stmt = BlockPredicateAppender(/*predicate=*/predicate)(std::move(new_stmt));
   }
@@ -464,7 +464,7 @@ StmtSRef Fuse(ScheduleState self, const Array<StmtSRef>& loop_srefs, bool preser
   StmtSRef outer_loop_sref{nullptr};
   const ForNode* outer_loop = nullptr;
   arith::Analyzer analyzer;
-  BindVar2Analyzer(&analyzer, self->mod);
+  // BindVar2Analyzer(&analyzer, self->mod);
   std::unordered_set<const VarNode*> outer_loop_vars;
   // Step 1. check correctness
   for (const StmtSRef& sref : loop_srefs) {

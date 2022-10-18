@@ -660,7 +660,7 @@ void ComputeAtOrReverseComputeAtImpl(ScheduleState self, const StmtSRef& block_s
 void ComputeAt(ScheduleState self, const StmtSRef& block_sref, const StmtSRef& loop_sref,
                bool preserve_unit_loops, int index) {
   arith::Analyzer analyzer;
-  BindVar2Analyzer(&analyzer, self->mod);
+  // BindVar2Analyzer(&analyzer, self->mod);
   ComputeAtOrReverseComputeAtImpl<true>(self, block_sref, loop_sref, preserve_unit_loops, &analyzer,
                                         false, index);
 }
@@ -668,7 +668,7 @@ void ComputeAt(ScheduleState self, const StmtSRef& block_sref, const StmtSRef& l
 void ReverseComputeAt(ScheduleState self, const StmtSRef& block_sref, const StmtSRef& loop_sref,
                       bool preserve_unit_loops, int index) {
   arith::Analyzer analyzer;
-  BindVar2Analyzer(&analyzer, self->mod);
+  // BindVar2Analyzer(&analyzer, self->mod);
   ComputeAtOrReverseComputeAtImpl<false>(self, block_sref, loop_sref, preserve_unit_loops,
                                          &analyzer, false, index);
 }
