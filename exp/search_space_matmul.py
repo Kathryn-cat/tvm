@@ -15,7 +15,7 @@ from tvm.meta_schedule.postproc import Postproc
 # fixed shape matmul
 @T.prim_func
 def matmulStatic(a: T.handle, b: T.handle, c: T.handle) -> None:
-    T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
+    T.func_attr({"global_symbol": "matmulStatic", "tir.noalias": True})
     A = T.match_buffer(a, (1024, 1024), "float16")
     B = T.match_buffer(b, (1024, 1024), "float16")
     C = T.match_buffer(c, (1024, 1024), "float16")
@@ -60,7 +60,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_mm = sch.blockize(i1)
     # loop max size is m, n, p
     l_g1, l_g2, l_g3 = sch.get_loops(b_mm)
-    cand, prob = categ(6)
+    cand, prob = categ(5)
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
@@ -435,10 +435,10 @@ def categ(k):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mine", action="store_true")
+    parser.add_argument("--ref", action="store_true")
     args = parser.parse_args()
 
-    if args.mine:
+    if not args.ref:
         sch = tvm.tir.Schedule(matmul)
         schedule_matmul(sch)
         sch.mod.show()
@@ -460,6 +460,20 @@ if __name__ == "__main__":
             print("memory valid, begin building")
             matmul_mod = tvm.build(sch.mod, target="cuda")
             print("built IR successfully")
+    # evaluate the running time
+            dev = tvm.cuda(0)
+            A_np = np.random.uniform(size=(2048, 1024)).astype("float16")
+            B_np = np.random.uniform(size=(1024, 2048)).astype("float16")
+            A_nd = tvm.nd.array(A_np, dev)
+            B_nd = tvm.nd.array(B_np, dev)
+            C_nd = tvm.nd.array(np.zeros((2048, 2048), dtype="float16"), dev)
+            matmul_mod(A_nd, B_nd, C_nd, 2, 1, 2)
+            np.testing.assert_allclose(A_np @ B_np, C_nd)
+            print("calculation is correct")
+            num_flop = 2 * 2048 * 2048 * 1024
+            evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
+            print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 2, 1, 2).mean / 1e9))
+
         else:
             print("memory invalid, stop building")
     else:
