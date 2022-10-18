@@ -395,7 +395,6 @@ Array<StmtSRef> Split(ScheduleState self, const StmtSRef& loop_sref, const Array
   }
   // Currently, loops not starting with 0 are not supported
   arith::Analyzer analyzer;
-  BindVar2Analyzer(&analyzer, self->mod);
   CheckLoopStartsWithZero(self, loop_sref, &analyzer);
 
   // Find the most common dtype
@@ -409,12 +408,14 @@ Array<StmtSRef> Split(ScheduleState self, const StmtSRef& loop_sref, const Array
   }
   int n = factors.size();
   PrimExpr substitute_value = make_const(dtype, 0);
+  PrimExpr upper_bound = make_const(dtype, 1);
   std::vector<Var> new_loop_vars;
   new_loop_vars.reserve(n);
   for (int i = 0; i < n; i++) {
     const PrimExpr& factor = factors[i];
     Var var = loop->loop_var.copy_with_suffix("_" + std::to_string(i)).copy_with_dtype(dtype);
     substitute_value = substitute_value * factor + var;
+    upper_bound = upper_bound * factor;
     analyzer.Bind(var, Range::FromMinExtent(make_const(dtype, 0), tvm::cast(dtype, factor)));
     new_loop_vars.emplace_back(std::move(var));
   }
@@ -431,7 +432,8 @@ Array<StmtSRef> Split(ScheduleState self, const StmtSRef& loop_sref, const Array
       &opaque_block_reuse)(std::move(new_stmt));
   // Step 3. Update predicate to guard the loop
   PrimExpr predicate = substitute_value < loop->extent;
-  if (!analyzer.CanProve(predicate)) {
+  BindVar2Analyzer(&analyzer, self->mod);
+  if (!analyzer.CanProve(upper_bound == loop->extent)) {
     new_stmt = BlockPredicateAppender(/*predicate=*/predicate)(std::move(new_stmt));
   }
   // Step 4. Generate nested loops to replace the original loop and simplify the binding
