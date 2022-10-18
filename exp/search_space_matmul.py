@@ -62,22 +62,22 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
-    res = sch.sample_perfect_tile(loop=l_g1r, n=4, max_innermost_factor=4)
-    l_g11_1, l_g12, l_g13, l_g14 = sch.split(loop=l_g1r, factors=[*res])
+    res = sch.sample_perfect_tile(loop=l_g1r, n=3, max_innermost_factor=4)
+    l_g12, l_g13, l_g14 = sch.split(loop=l_g1r, factors=[*res])
     # split l_g2
     v1_g2 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
-    res = sch.sample_perfect_tile(loop=l_g2r, n=4, max_innermost_factor=4)
-    l_g21_1, l_g22, l_g23, l_g24 = sch.split(loop=l_g2r, factors=[*res])
+    res = sch.sample_perfect_tile(loop=l_g2r, n=3, max_innermost_factor=4)
+    l_g22, l_g23, l_g24 = sch.split(loop=l_g2r, factors=[*res])
     # split l_g3
     v1_g3 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
     res = sch.sample_perfect_tile(loop=l_g3r, n=2, max_innermost_factor=4)
     l_g32, l_g33 = sch.split(loop=l_g3r, factors=[*res])
     # only l_g11, l_g21, l_g31 are dynamic loops
-    sch.reorder(l_g11, l_g21_1, l_g11_1, l_g21, l_g12, l_g22, l_g31, l_g32, l_g13, l_g23, l_g33, l_g14, l_g24)
-    l_g1 = sch.fuse(l_g11, l_g21_1)
-    l_g2 = sch.fuse(l_g11_1, l_g21)
+    sch.reorder(l_g11, l_g21, l_g12, l_g22, l_g31, l_g32, l_g13, l_g23, l_g33, l_g14, l_g24)
+    l_g1 = l_g11
+    l_g2 = l_g21
     l_g3 = sch.fuse(l_g12, l_g22)
     sch.bind(loop=l_g1, thread_axis="blockIdx.y")
     sch.bind(loop=l_g2, thread_axis="blockIdx.x")
