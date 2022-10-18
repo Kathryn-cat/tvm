@@ -45,14 +45,6 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.i
 
 def schedule_matmul(sch: tir.Schedule) -> None:
     b_C = sch.get_block("C")
-    sch.transform_layout(
-        block=b_C,
-        buffer=("read", 1),
-        index_map=lambda vj, vk: (
-            vk,
-            vj,
-        ),
-    )
     i, j, k = sch.get_loops(block=b_C)
     i0, i1 = sch.split(loop=i, factors=[None, 16])
     j0, j1 = sch.split(loop=j, factors=[None, 16])
@@ -158,7 +150,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     sch.tensorize(block_or_loop=l_ti, tensor_intrin="wmma_fill_16x16x16_f16")
     b_tc = sch.get_block("C")
     l_tc, _, _ = sch.get_loops(block=b_tc)
-    sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
+    sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
 
 
 def apply_trace(sch):
