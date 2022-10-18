@@ -31,10 +31,10 @@ def matmulStatic(a: T.handle, b: T.handle, c: T.handle) -> None:
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (4096 * m, 4096 * n), "float16")
-    B = T.match_buffer(b, (4096 * n, 4096 * p), "float16")
-    C = T.match_buffer(c, (4096 * m, 4096 * p), "float16")
-    for i, j, k in T.grid(4096 * m, 4096 * n, 4096 * p):
+    A = T.match_buffer(a, (1024 * m, 1024 * n), "float16")
+    B = T.match_buffer(b, (1024 * n, 1024 * p), "float16")
+    C = T.match_buffer(c, (1024 * m, 1024 * p), "float16")
+    for i, j, k in T.grid(1024 * m, 1024 * n, 1024 * p):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -60,7 +60,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_mm = sch.blockize(i1)
     # loop max size is m, n, p
     l_g1, l_g2, l_g3 = sch.get_loops(b_mm)
-    cand, prob = categ(8)
+    cand, prob = categ(6)
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
