@@ -18,6 +18,9 @@
  */
 #include <tvm/tir/transform.h>
 
+#include <iostream>
+using namespace std;
+
 #include "../utils.h"
 
 namespace tvm {

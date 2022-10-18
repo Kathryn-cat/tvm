@@ -92,6 +92,7 @@ class GPUCodeVerifier : public StmtExprVisitor {
 
       Var var = op->node.as<IterVarNode>()->var;
       const auto* extent = op->value.as<IntImmNode>();
+      LOG(INFO) << "var: " << var << " op->value: " << op->value;
       ICHECK(extent);
 
       std::string name = var.get()->name_hint;

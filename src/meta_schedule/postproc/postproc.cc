@@ -16,7 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#include <iostream>
+
 #include "../utils.h"
+using namespace std;
 
 namespace tvm {
 namespace meta_schedule {
