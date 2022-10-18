@@ -2,6 +2,7 @@ import argparse
 from typing import List
 
 import numpy as np
+import torch
 
 import tvm
 from tvm import meta_schedule as ms
@@ -460,19 +461,25 @@ if __name__ == "__main__":
             print("memory valid, begin building")
             matmul_mod = tvm.build(sch.mod, target="cuda")
             print("built IR successfully")
-    # evaluate the running time
+            # evaluate the running time
             dev = tvm.cuda(0)
-            A_np = np.random.uniform(size=(2048, 1024)).astype("float16")
-            B_np = np.random.uniform(size=(1024, 2048)).astype("float16")
+            A_np = np.random.uniform(size=(4096, 4096)).astype("float16")
+            B_np = np.random.uniform(size=(4096, 4096)).astype("float16")
             A_nd = tvm.nd.array(A_np, dev)
             B_nd = tvm.nd.array(B_np, dev)
-            C_nd = tvm.nd.array(np.zeros((2048, 2048), dtype="float16"), dev)
-            matmul_mod(A_nd, B_nd, C_nd, 2, 1, 2)
-            np.testing.assert_allclose(A_np @ B_np, C_nd)
+            C_nd = tvm.nd.array(np.zeros((4096, 4096), dtype="float16"), dev)
+            device = torch.device('cuda:0')
+            C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np.T).to(device)
+            print(f"C_np: {C_np}")
+            matmul_mod(A_nd, B_nd, C_nd, 4, 4, 4)
+            print(f"C_nd: {C_nd}")
+            """
+            np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd)
             print("calculation is correct")
-            num_flop = 2 * 2048 * 2048 * 1024
+            num_flop = 2 * 1024 * 1024 * 1024
             evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
-            print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 2, 1, 2).mean / 1e9))
+            print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1, 1, 1).mean / 1e9))
+            """
 
         else:
             print("memory invalid, stop building")
