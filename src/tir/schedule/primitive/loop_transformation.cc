@@ -395,6 +395,7 @@ Array<StmtSRef> Split(ScheduleState self, const StmtSRef& loop_sref, const Array
   }
   // Currently, loops not starting with 0 are not supported
   arith::Analyzer analyzer;
+  BindVar2Analyzer(&analyzer, self->mod);
   CheckLoopStartsWithZero(self, loop_sref, &analyzer);
 
   // Find the most common dtype
@@ -461,6 +462,7 @@ StmtSRef Fuse(ScheduleState self, const Array<StmtSRef>& loop_srefs, bool preser
   StmtSRef outer_loop_sref{nullptr};
   const ForNode* outer_loop = nullptr;
   arith::Analyzer analyzer;
+  BindVar2Analyzer(&analyzer, self->mod);
   std::unordered_set<const VarNode*> outer_loop_vars;
   // Step 1. check correctness
   for (const StmtSRef& sref : loop_srefs) {

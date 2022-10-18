@@ -442,6 +442,27 @@ inline String BufferIndexType2Str(BufferIndexType buffer_index_type) {
   }
 }
 
+inline void BindVar2Analyzer(arith::Analyzer* analyzer, IRModule mod) {
+  std::set<String> bindVars;
+  for (const auto& pair : mod->functions) {
+    if (const PrimFuncNode* prim_func = pair.second.as<PrimFuncNode>()) {
+      for (auto& item : prim_func->buffer_map) {
+        for (auto& expr : item.second->shape) {
+          PostOrderVisit(expr, [analyzer, &bindVars](const ObjectRef& obj) {
+            if (obj->IsInstance<VarNode>()) {
+              const Var& var = GetRef<Var>(obj.as<VarNode>());
+              if (bindVars.find(var->name_hint) == bindVars.end()) {
+                analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
+                bindVars.insert(var->name_hint);
+              }
+            }
+          });
+        }
+      }
+    }
+  }
+}
+
 }  // namespace tir
 }  // namespace tvm
 
