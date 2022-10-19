@@ -55,18 +55,24 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     cand, prob = categ(5)
     # split l_g1
     v1_g1 = sch.sample_categorical(candidates=cand, probs=prob)
+    # v1_g1 = 4
     l_g11, l_g1r = sch.split(loop=l_g1, factors=[None, v1_g1])
     res = sch.sample_perfect_tile(loop=l_g1r, n=3, max_innermost_factor=4)
+    # res = [2, 1, 2]
     l_g12, l_g13, l_g14 = sch.split(loop=l_g1r, factors=[*res])
     # split l_g2
     v1_g2 = sch.sample_categorical(candidates=cand, probs=prob)
+    # v1_g2 = 8
     l_g21, l_g2r = sch.split(loop=l_g2, factors=[None, v1_g2])
     res = sch.sample_perfect_tile(loop=l_g2r, n=3, max_innermost_factor=4)
+    # res = [2, 2, 2]
     l_g22, l_g23, l_g24 = sch.split(loop=l_g2r, factors=[*res])
     # split l_g3
     v1_g3 = sch.sample_categorical(candidates=cand, probs=prob)
+    # v1_g3 = 4
     l_g31, l_g3r = sch.split(loop=l_g3, factors=[None, v1_g3])
     res = sch.sample_perfect_tile(loop=l_g3r, n=2, max_innermost_factor=4)
+    # res = [4, 1]
     l_g32, l_g33 = sch.split(loop=l_g3r, factors=[*res])
     # only l_g11, l_g21, l_g31 are dynamic loops
     sch.reorder(l_g11, l_g21, l_g12, l_g22, l_g31, l_g32, l_g13, l_g23, l_g33, l_g14, l_g24)
@@ -85,6 +91,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     cand, prob = categ(3)  # sample the vectorize size
     _, _, _, l_s = sch.get_loops(block=C_shared)
     v_s = sch.sample_categorical(candidates=cand, probs=prob)
+    # v_s = 4
     l_s1, l_s2, l_s3, l_s4 = sch.split(loop=l_s, factors=[None, sch.get(l_g3).extent, 32, v_s])
     sch.vectorize(loop=l_s4)
     sch.bind(loop=l_s3, thread_axis="threadIdx.x")
@@ -109,6 +116,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # cooperative fetch for shared memory for A
     _, _, _, _, l_s = sch.get_loops(block=A_shared)
     v_s = sch.sample_categorical(candidates=cand, probs=prob)
+    # v_s = 8
     l_s1, l_s2, l_s3, l_s4 = sch.split(loop=l_s, factors=[None, sch.get(l_g3).extent, 32, v_s])
     sch.vectorize(loop=l_s4)
     sch.bind(loop=l_s3, thread_axis="threadIdx.x")
@@ -116,6 +124,7 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     # cooperative fetch for shared memory for B
     _, _, _, _, l_s = sch.get_loops(block=B_shared)
     v_s = sch.sample_categorical(candidates=cand, probs=prob)
+    # v_s = 4
     l_s1, l_s2, l_s3, l_s4 = sch.split(loop=l_s, factors=[None, sch.get(l_g3).extent, 32, v_s])
     sch.vectorize(loop=l_s4)
     sch.bind(loop=l_s3, thread_axis="threadIdx.x")
