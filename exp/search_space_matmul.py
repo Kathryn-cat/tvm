@@ -1,4 +1,5 @@
 from typing import List
+import argparse
 
 import numpy as np
 import torch
@@ -159,6 +160,31 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_tc = sch.get_block("C")
     l_tc, _, _ = sch.get_loops(block=b_tc)
     sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
+
+
+def schedule_matmul_1(sch: tir.Schedule) -> None:
+    C = sch.get_block("C")
+    i, j, k = sch.get_loops(C)
+    i0, i1 = sch.split(i, [None, 128])
+    j0, j1 = sch.split(j, [None, 128])
+    sch.reorder(i0, j0, i1, j1, k)
+    sch.blockize(i1)
+
+    k0, k1 = sch.split(k, [None, 32])
+    sch.reorder(k0, i1, j1, k1)
+    CTA = sch.blockize(i1)
+
+    i2, i3 = sch.split(i1, [None, 16])
+    j2, j3 = sch.split(j1, [None, 16])
+    k2, k3 = sch.split(k1, [None, 16])
+    sch.reorder(i2, j2, k2, i3, j3, k3)
+    C = sch.blockize(i3)
+
+    A_shared = sch.cache_read(C, 1, "shared")
+    B_shared = sch.cache_read(C, 2, "shared")
+    A_wmma = sch.cache_read(C, 1, "wmma.matrix_a")
+    B_wmma = sch.cache_read(C, 2, "wmma.matrix_b")
+    C_wmma = sch.cache_write(CTA, 0, "wmma.accumulator")
 
 
 def apply_trace(sch):
@@ -544,4 +570,13 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true")
+    args = parser.parse_args()
+
+    if args.test:
+        sch = tir.Schedule(matmul, debug_mask="all")
+        schedule_matmul_1(sch)
+        sch.mod.show()
+    else:
+        test()
