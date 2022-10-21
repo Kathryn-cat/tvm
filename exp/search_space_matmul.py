@@ -154,12 +154,10 @@ def schedule_matmul(sch: tir.Schedule) -> None:
     b_Co = sch.get_block("C_o")
     sch.decompose_reduction(block=b_Co, loop=l_g31)
     # tensorize
-    b_ti = sch.get_block("C_init")
-    l_ti, _ = sch.get_loops(block=b_ti)
-    sch.tensorize(block_or_loop=l_ti, tensor_intrin="wmma_fill_16x16x16_f16")
-    b_tc = sch.get_block("C")
-    l_tc, _, _ = sch.get_loops(block=b_tc)
-    sch.tensorize(block_or_loop=l_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
+    b_ti = sch.get_block("C_o_init")
+    sch.tensorize(block_or_loop=b_ti, tensor_intrin="wmma_fill_16x16x16_f16")
+    b_tc = sch.get_block("C_o_update")
+    sch.tensorize(block_or_loop=b_tc, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
 
 
 def schedule_matmul_1(sch: tir.Schedule) -> None:
