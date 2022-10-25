@@ -34,6 +34,7 @@
 
 #include <unordered_set>
 
+#include "../../printer/text_printer.h"
 #include "../../runtime/thread_storage_scope.h"
 #include "../schedule/transform.h"
 #include "tvm/tir/stmt.h"
@@ -268,6 +269,8 @@ Pass ManifestSharedMemoryLocalStage() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto* n = f.CopyOnWrite();
     n->body = SharedMemoryLocalStageInserter()(std::move(n->body));
+    // not much diff
+    // LOG(INFO) << AsTVMScript(f);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.ManifestSharedMemoryLocalStage", {});

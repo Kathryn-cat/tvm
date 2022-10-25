@@ -27,6 +27,7 @@
 
 #include <unordered_set>
 
+#include "../../printer/text_printer.h"
 #include "../../support/utils.h"
 #include "../schedule/utils.h"
 #include "./ir_utils.h"
@@ -1198,6 +1199,8 @@ Pass InjectSoftwarePipeline() {
     auto* fptr = f.CopyOnWrite();
     fptr->body = software_pipeline::PipelineInjector::Inject(f);
     fptr->body = ConvertSSA(std::move(fptr->body));
+    // no diff
+    // LOG(INFO) << AsTVMScript(f);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.InjectSoftwarePipeline", {});

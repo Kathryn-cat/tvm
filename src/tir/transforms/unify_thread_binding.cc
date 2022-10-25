@@ -26,6 +26,7 @@
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
+#include "../../printer/text_printer.h"
 #include "../../support/utils.h"
 #include "ir_utils.h"
 
@@ -187,7 +188,10 @@ namespace transform {
 
 Pass UnifyThreadBinding() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return UnifyThreadBinding(std::move(f));
+    auto res = UnifyThreadBinding(std::move(f));
+    // change var for blockidx and threadidx
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.UnifyThreadBinding", {});
 }

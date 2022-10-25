@@ -28,6 +28,7 @@
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
+#include "../../printer/text_printer.h"
 #include "../ir/functor_common.h"
 #include "ir_utils.h"
 
@@ -272,7 +273,9 @@ namespace transform {
 
 Pass LowerMatchBuffer() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    return LowerMatchBuffer(std::move(f));
+    auto res = LowerMatchBuffer(std::move(f));
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerMatchBuffer", {});
 }

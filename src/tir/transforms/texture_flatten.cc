@@ -33,6 +33,7 @@
 #include <unordered_map>
 
 #include "../../arith/ir_visitor_with_analyzer.h"
+#include "../../printer/text_printer.h"
 #include "../../runtime/texture.h"
 #include "../../runtime/thread_storage_scope.h"
 
@@ -198,7 +199,10 @@ namespace transform {
 
 Pass TextureFlatten() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return TextureFlatten(std::move(f));
+    auto res = TextureFlatten(std::move(f));
+    // not differ much
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.TextureFlatten", {});
 }

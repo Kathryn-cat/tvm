@@ -31,6 +31,7 @@
 
 #include <unordered_set>
 
+#include "../../printer/text_printer.h"
 #include "ir_utils.h"
 
 namespace tvm {
@@ -102,6 +103,8 @@ Pass InjectPrefetch() {
     if (IsFromLegacyTESchedule(f)) {
       auto* n = f.CopyOnWrite();
       n->body = PrefetchInjector()(std::move(n->body));
+      // not applied here
+      // LOG(INFO) << AsTVMScript(n->body);
       return f;
     } else {
       return f;

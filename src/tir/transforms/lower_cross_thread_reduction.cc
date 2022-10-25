@@ -25,6 +25,7 @@
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
+#include "../../printer/text_printer.h"
 #include "../schedule/analysis.h"
 #include "./ir_utils.h"
 
@@ -673,7 +674,10 @@ namespace transform {
 
 Pass LowerCrossThreadReduction() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return LowerCrossThreadReduction(std::move(f));
+    auto res = LowerCrossThreadReduction(std::move(f));
+    // no diff
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerCrossThreadReduction", {});
 }

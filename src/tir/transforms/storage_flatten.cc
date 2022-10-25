@@ -40,6 +40,7 @@
 #include <unordered_set>
 
 #include "../../arith/ir_visitor_with_analyzer.h"
+#include "../../printer/text_printer.h"
 #include "../../runtime/thread_storage_scope.h"
 #include "arg_binder.h"
 #include "ir_utils.h"
@@ -1899,7 +1900,10 @@ TVM_REGISTER_GLOBAL("tir.transform.ApplyLayoutTransforms")
 // TODO(tvm-team): consolidate configs to the PassContext
 Pass StorageFlatten(int cache_line_size, bool create_bound_attributes) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return StorageFlatten(std::move(f), cache_line_size, create_bound_attributes);
+    auto res = StorageFlatten(std::move(f), cache_line_size, create_bound_attributes);
+    // no diff
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.StorageFlatten", {});
 }

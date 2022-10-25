@@ -25,6 +25,7 @@
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
+#include "../../printer/text_printer.h"
 #include "ir_utils.h"
 
 namespace tvm {
@@ -79,7 +80,10 @@ namespace transform {
 
 Pass LowerInitBlock() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    return LowerInitBlock(std::move(f));
+    auto res = LowerInitBlock(std::move(f));
+    // no diff
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerInitBlock", {});
 }
