@@ -169,7 +169,7 @@ def categ(k):
     return cand, list(prob)
 
 
-def test():
+def testStatic():
         sch = tvm.tir.Schedule(matmulStatic)
         schedule_matmul(sch)
         # sch.mod.show()
@@ -192,5 +192,29 @@ def test():
         print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
 
 
+def testDyn():
+        sch = tvm.tir.Schedule(matmul)
+        schedule_matmul(sch)
+        # sch.mod.show()
+        matmul_mod = tvm.build(sch.mod, target="cuda")
+
+        # evaluate the running time
+        dev = tvm.cuda(0)
+        A_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        B_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        A_nd = tvm.nd.array(A_np, dev)
+        B_nd = tvm.nd.array(B_np, dev)
+        C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+        device = torch.device('cuda:0')
+        C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
+        matmul_mod(A_nd, B_nd, C_nd, 1, 1, 1)
+        np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
+        # print("calculation is correct")
+        num_flop = 2 * 1024 * 1024 * 1024
+        evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
+        print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1, 1, 1).mean / 1e9))
+
+
 if __name__ == "__main__":
-    test()
+    testStatic()
+    testDyn()
