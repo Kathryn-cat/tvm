@@ -200,7 +200,7 @@ namespace transform {
 Pass LowerOpaqueBlock() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto res = LowerOpaqueBlock(std::move(f));
-    // major difference
+    // no diff
     // LOG(INFO) << AsTVMScript(res);
     return res;
   };

@@ -32,6 +32,7 @@
 
 #include "../../arith/ir_mutator_with_analyzer.h"
 #include "../../arith/ir_visitor_with_analyzer.h"
+#include "../../printer/text_printer.h"
 
 namespace tvm {
 namespace tir {
@@ -407,6 +408,7 @@ Pass BF16TypeLowering() {
 TVM_REGISTER_GLOBAL("tir.transform.BF16TypeLowering").set_body_typed(BF16TypeLowering);
 
 Pass BF16Legalize() {
+  // not printable
   return Sequential({BF16Promote(), BF16CastElimination(), BF16TypeLowering()}, "tir.BF16Legalize");
 }
 

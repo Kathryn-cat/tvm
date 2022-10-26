@@ -30,6 +30,7 @@
 #include <tvm/tir/transform.h>
 
 #include "../../arith/ir_mutator_with_analyzer.h"
+#include "../../printer/text_printer.h"
 
 namespace tvm {
 namespace arith {
@@ -162,6 +163,7 @@ Pass Simplify() {
     auto* n = f.CopyOnWrite();
     arith::Analyzer analyzer;
     n->body = arith::StmtSimplifier(&analyzer).Simplify(std::move(n->body));
+    // LOG(INFO) << AsTVMScript(n->body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.Simplify", {});

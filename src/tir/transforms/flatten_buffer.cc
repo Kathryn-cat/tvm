@@ -25,6 +25,7 @@
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
+#include "../../printer/text_printer.h"
 #include "ir_utils.h"
 
 namespace tvm {
@@ -268,7 +269,10 @@ namespace transform {
 
 Pass FlattenBuffer() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return FlattenBuffer(std::move(f));
+    auto res = FlattenBuffer(std::move(f));
+    // no diff, except that some vars are not replaced
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.FlattenBuffer", {});
 }

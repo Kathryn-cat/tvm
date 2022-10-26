@@ -29,6 +29,7 @@
 
 #include "../../arith/ir_mutator_with_analyzer.h"
 #include "../../arith/ir_visitor_with_analyzer.h"
+#include "../../printer/text_printer.h"
 
 namespace tvm {
 namespace tir {
@@ -495,6 +496,8 @@ Pass NarrowDataType(int target_bits) {
   auto pass_func = [target_bits](PrimFunc f, IRModule m, PassContext ctx) {
     auto* n = f.CopyOnWrite();
     n->body = DataTypeRewriter(target_bits)(std::move(n->body));
+    // no diff
+    // LOG(INFO) << AsTVMScript(f);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.NarrowDataType", {});
