@@ -277,7 +277,7 @@ def testStatic():
 def testDyn():
         sch = tvm.tir.Schedule(matmul)
         apply_trace(sch)
-        sch.mod.show()
+        # sch.mod.show()
         matmul_mod = tvm.build(sch.mod, target="cuda")
 
         # evaluate the running time
@@ -299,3 +299,4 @@ def testDyn():
 
 if __name__ == "__main__":
     testStatic()
+    testDyn()
