@@ -48,65 +48,6 @@ def apply_trace(sch):
     b0 = sch.get_block(name="C", func_name="main")
     b1 = sch.get_block(name="root", func_name="main")
     sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
-    b2 = sch.reindex(block=b0, buffer=("write", 0))
-    b3 = sch.reindex(block=b0, buffer=("read", 0))
-    b4 = sch.reindex(block=b0, buffer=("read", 1))
-    sch.transform_layout(
-        block=b0,
-        buffer=("read", 0),
-        index_map=lambda vi, vk: (
-            vi,
-            vk,
-        ),
-    )
-    sch.transform_layout(
-        block=b0,
-        buffer=("read", 1),
-        index_map=lambda vj, vk: (
-            vk,
-            vj,
-        ),
-    )
-    sch.transform_layout(
-        block=b0,
-        buffer=("write", 0),
-        index_map=lambda vi, vj: (
-            vi,
-            vj,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b2,
-        index_map=lambda vi, vj, vk: (
-            vi,
-            vj,
-            vk,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b3,
-        index_map=lambda vi, vj, vk: (
-            vi,
-            vj,
-            vk,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b4,
-        index_map=lambda vi, vj, vk: (
-            vi,
-            vj,
-            vk,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b0,
-        index_map=lambda vi, vj, vk: (
-            vi,
-            vj,
-            vk,
-        ),
-    )
     l5, l6, l7 = sch.get_loops(block=b0)  # from outer to inner
     l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
     l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
@@ -166,8 +107,6 @@ def apply_trace(sch):
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
-    sch.reverse_compute_inline(block=b2)
-    """
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
@@ -221,8 +160,6 @@ def apply_trace(sch):
         ann_key="meta_schedule.auto_tensorize",
         ann_val="wmma_load_16x16x16_f16_b",
     )
-    sch.compute_inline(block=b3)
-    sch.compute_inline(block=b4)
     # TODO: figure out buffer_dim_align
     sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
     sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
@@ -300,41 +237,65 @@ def apply_trace(sch):
     b234 = sch.get_block(name="C_o_init", func_name="main")
     sch.unannotate(block_or_loop=b234, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b234, tensor_intrin="wmma_fill_16x16x16_f16")
-    b235 = sch.get_block(name="A_reindex_shared_wmma.matrix_a_o", func_name="main")
+    b235 = sch.get_block(name="A_shared_wmma.matrix_a_o", func_name="main")
     sch.unannotate(block_or_loop=b235, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b235, tensor_intrin="wmma_load_16x16x16_f16_a")
-    b236 = sch.get_block(name="B_reindex_shared_wmma.matrix_b_o", func_name="main")
+    b236 = sch.get_block(name="B_shared_wmma.matrix_b_o", func_name="main")
     sch.unannotate(block_or_loop=b236, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b236, tensor_intrin="wmma_load_16x16x16_f16_b")
     b237 = sch.get_block(name="C_o_update", func_name="main")
     sch.unannotate(block_or_loop=b237, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b237, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
-    b238 = sch.get_block(name="C_reindex_shared_wmma.accumulator_o", func_name="main")
+    b238 = sch.get_block(name="C_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
-    """
 
 
-def test():
-    sch = tir.Schedule(matmulStatic)
-    apply_trace(sch)
-    sch.mod.show()
-    # matmul_mod = tvm.build(sch.mod, target="cuda")
-    """
-    # evaluate the running time
-    dev = tvm.cuda(0)
-    C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
-    device = torch.device('cuda:0')
-    C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
-    # print(f"C_np: {C_np}")
-    matmul_mod(A_nd, B_nd, C_nd)
-    # print(f"C_nd: {C_nd}")
-    np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
-    # print("calculation is correct")
-    evaluator = matmul_mod.time_evaluator("matmulStatic", dev, number=10)
-    print("static matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
-    """
+def testStatic():
+        sch = tvm.tir.Schedule(matmulStatic)
+        apply_trace(sch)
+        # sch.mod.show()
+        matmul_mod = tvm.build(sch.mod, target="cuda")
+
+        # evaluate the running time
+        dev = tvm.cuda(0)
+        A_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        B_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        A_nd = tvm.nd.array(A_np, dev)
+        B_nd = tvm.nd.array(B_np, dev)
+        C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+        device = torch.device('cuda:0')
+        C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
+        matmul_mod(A_nd, B_nd, C_nd)
+        np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
+        # print("calculation is correct")
+        num_flop = 2 * 1024 * 1024 * 1024
+        evaluator = matmul_mod.time_evaluator("matmulStatic", dev, number=10)
+        print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
+
+
+def testDyn():
+        sch = tvm.tir.Schedule(matmul)
+        apply_trace(sch)
+        sch.mod.show()
+        matmul_mod = tvm.build(sch.mod, target="cuda")
+
+        # evaluate the running time
+        dev = tvm.cuda(0)
+        A_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        B_np = np.random.uniform(size=(1024, 1024)).astype("float16")
+        A_nd = tvm.nd.array(A_np, dev)
+        B_nd = tvm.nd.array(B_np, dev)
+        C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+        device = torch.device('cuda:0')
+        C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
+        matmul_mod(A_nd, B_nd, C_nd, 1, 1, 1)
+        np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
+        # print("calculation is correct")
+        num_flop = 2 * 1024 * 1024 * 1024
+        evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
+        print("matmul running time: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1, 1, 1).mean / 1e9))
 
 
 if __name__ == "__main__":
-    test()
+    testStatic()
