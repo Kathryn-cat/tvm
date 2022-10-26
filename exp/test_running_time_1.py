@@ -102,10 +102,10 @@ class DynModule:
                 B_shared_2 = T.decl_buffer([64, 128], dtype="float16", data=B_shared, strides=[136, 1], scope="shared")
                 for ax0_ax1_fused_0 in T.serial(4):
                     for ax0_ax1_fused_3 in T.vectorized(8):
-                        A_shared_1[ax0_ax1_fused_0 * 1152 + threadIdx_y * 288 + (threadIdx_x * 8 + ax0_ax1_fused_3) // 64 * 72 + (threadIdx_x * 8 + ax0_ax1_fused_3) % 64] = A[k_0_0 * 64 + (blockIdx_y * 64 + ax0_ax1_fused_0 * 16 + threadIdx_y * 4 + (threadIdx_x * 8 + ax0_ax1_fused_3) // 64) * (n * 1024) + (threadIdx_x * 8 + ax0_ax1_fused_3) % 64]
+                        A_shared_1[ax0_ax1_fused_0 * 1152 + threadIdx_y * 288 + (threadIdx_x * 8 + ax0_ax1_fused_3) // 64 * 72 + (threadIdx_x * 8 + ax0_ax1_fused_3) % 64] = A[blockIdx_y * 65536 * n + ax0_ax1_fused_0 * 16384 * n + threadIdx_y * 4096 * n + (threadIdx_x * 8 + ax0_ax1_fused_3) // 64 * 1024 * n + k_0_0 * 64 + (threadIdx_x * 8 + ax0_ax1_fused_3) % 64]
                 for ax0_ax1_fused_0 in T.serial(16):
                     for ax0_ax1_fused_3 in T.vectorized(4):
-                        B_shared_1[ax0_ax1_fused_0 * 544 + (threadIdx_x * 4 + ax0_ax1_fused_3) // 128 * 136 + threadIdx_y * 136 + (threadIdx_x * 4 + ax0_ax1_fused_3) % 128] = B[blockIdx_x * 128 + (k_0_0 * 64 + ax0_ax1_fused_0 * 4 + (threadIdx_x * 4 + ax0_ax1_fused_3) // 128 + threadIdx_y) * (p * 1024) + (threadIdx_x * 4 + ax0_ax1_fused_3) % 128]
+                        B_shared_1[ax0_ax1_fused_0 * 544 + (threadIdx_x * 4 + ax0_ax1_fused_3) // 128 * 136 + threadIdx_y * 136 + (threadIdx_x * 4 + ax0_ax1_fused_3) % 128] = B[k_0_0 * 65536 * p + ax0_ax1_fused_0 * 4096 * p + (threadIdx_x * 4 + ax0_ax1_fused_3) // 128 * 1024 * p + threadIdx_y * 1024 * p + blockIdx_x * 128 + (threadIdx_x * 4 + ax0_ax1_fused_3) % 128]
                 for k_0_1 in T.serial(4):
                     B_shared_wmma_matrix_b = T.allocate([1024], "float16", "wmma.matrix_b")
                     A_shared_wmma_matrix_a = T.allocate([512], "float16", "wmma.matrix_a")
@@ -120,7 +120,7 @@ class DynModule:
         for ax0 in T.serial(64):
             for ax1_3 in T.vectorized(4):
                 if ((0 * 4 + threadIdx_y) * 32 + threadIdx_x) * 4 + ax1_3 < 128:
-                    C[blockIdx_x * 128 + threadIdx_y * 128 + threadIdx_x * 4 + (blockIdx_y * 64 + ax0) * (p * 1024) + ax1_3] = C_shared_1[ax0 * 128 + threadIdx_y * 128 + threadIdx_x * 4 + ax1_3]
+                    C[blockIdx_y * 65536 * p + ax0 * 1024 * p + blockIdx_x * 128 + threadIdx_y * 128 + threadIdx_x * 4 + ax1_3] = C_shared_1[ax0 * 128 + threadIdx_y * 128 + threadIdx_x * 4 + ax1_3]
 
 
 def test_dyn_module():
