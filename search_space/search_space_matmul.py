@@ -1,3 +1,11 @@
+"""
+In this file, I handcrafted a search space for 1024 * m, 1024 * n, 1024 * p matmul,
+based on the search space from MetaSchedule. The search space is direct loop partition 
+with categorical sampling, exposing some issues in sch rules and compilers. This is the 
+first step in investigating dynamic shape search space. 
+"""
+
+
 from typing import List
 import argparse
 
