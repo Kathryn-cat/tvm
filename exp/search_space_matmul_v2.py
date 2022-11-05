@@ -37,3 +37,15 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.i
             with T.init():
                 C[vi, vj] = T.float16(0.0)
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+def schedule_matmul(sch: tir.Schedule) -> None:
+    pass
+
+
+def test():
+    sch = tir.Schedule(matmul, debug_mask="all")
+
+
+if __name__ == "__main__":
+    test()
