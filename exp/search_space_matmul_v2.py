@@ -28,10 +28,10 @@ subregion computation.
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (1024, 512 * n), "float16")
-    B = T.match_buffer(b, (512 * n, 1024), "float16")
+    A = T.match_buffer(a, (1024, 512), "float16")
+    B = T.match_buffer(b, (512, 1024), "float16")
     C = T.match_buffer(c, (1024, 1024), "float16")
-    for i, j, k in T.grid(1024, 512 * n, 1024):
+    for i, j, k in T.grid(1024, 512, 1024):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -40,11 +40,30 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, m: T.int32, n: T.int32, p: T.i
 
 
 def schedule_matmul(sch: tir.Schedule) -> None:
-    pass
+    # first step: blockize the subregion
+    C = sch.get_block("C")
+    i, j, k = sch.get_loops(C)
 
 
 def test():
     sch = tir.Schedule(matmul, debug_mask="all")
+    schedule_matmul(sch)
+    matmul_mod = tvm.build(sch.mod, target="llvm")
+
+    # testing
+    dev = tvm.cuda(0)
+    A_np = np.random.uniform(size=(1024, 512)).astype("float16")
+    B_np = np.random.uniform(size=(512, 1024)).astype("float16")
+    A_nd = tvm.nd.array(A_np, dev)
+    B_nd = tvm.nd.array(B_np, dev)
+    C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+    # calculate numpy multiplication results
+    device = torch.device("cuda:0")
+    C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
+    # calculate tvm multiplication results
+    matmul_mod(A_nd, B_nd, C_nd, 1, 1, 1)
+    print(C_np)
+    print(C_nd)
 
 
 if __name__ == "__main__":
