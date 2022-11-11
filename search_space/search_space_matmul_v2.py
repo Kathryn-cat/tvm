@@ -50,6 +50,20 @@ def tune_microkernel(mod):
             max_trials_global=1000,
             work_dir="logs",
         )
+        # find the best trace
+        min_run_time = 1.0
+        best_idx = -1
+        for i, record in enumerate(sch.get_all_tuning_records()):
+            if record.run_secs[0].value < min_run_time:
+                min_run_time = record.run_secs[0].value
+                best_idx = i
+        print(f"best tuning record is {best_idx}, min_run_time is {min_run_time}")
+        trace = sch.get_all_tuning_records()[best_idx].trace
+        print("trace:")
+        print(trace)
+        sch = tir.Schedule(mod, debug_mask="all")
+        trace.apply_to_schedule(sch, False)
+    return sch.mod
 
 
 @T.prim_func
@@ -96,4 +110,5 @@ def test(build=False):
 
 
 if __name__ == "__main__":
-    tune_microkernel(microkernel)
+    optimized_mod = tune_microkernel(microkernel)
+    optimized_mod.show()
