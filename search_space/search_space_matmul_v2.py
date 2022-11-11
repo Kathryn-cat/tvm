@@ -2,8 +2,12 @@
 In this file, I start with handcrafting the intermediate states 
 and bridging the gap between static matmul and fully dynamic 
 matmul. This file focuses on the case where only the reduction
-loop contains dynamic variable. The method we use is the microkernel
-idea. The goal here is to align performance with the static case. 
+loop contains dynamic variable. The goal here is to align performance
+with the static case. 
+
+The method here is to saturate a thread and tile up, using a 128 * 128 * 32
+microkernel, and see if the performance can be aligned with
+MetaSchedule performance.
 
 Test with this branch with no hacks. (previous hacks in dyn-shape)
 """
@@ -20,12 +24,20 @@ from tvm.script import tir as T
 from tvm.tir.tensor_intrin import cuda as _
 from tvm.tir.tensor_intrin.cuda import get_wmma_store_intrin
 
-"""
-Suppose we have a high-performance 128 * 128 * 32 microkernel. This will be
-acquired later from MetaSchedule tuning.
-Question: how to get this from MS tuning since it is not a complete IR module?
-Question: is microkernel essentially register-level computation and caching?
-"""
+
+@T.prim_func
+def microkernel(
+    A: T.Buffer[(128, 32), "float16"],
+    B: T.Buffer[(32, 128), "float16"],
+    C: T.Buffer[(128, 128), "float16"],
+) -> None:
+    T.func_attr({"global_symbol": "main", "tir.noalias": True})
+    for i, j, k in T.grid(128, 128, 32):
+        with T.block("C"):
+            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+            with T.init():
+                C[vi, vj] = 0.0
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
 @T.prim_func
@@ -42,53 +54,8 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
-def schedule_matmul(sch: tir.Schedule) -> None:
-    # first step: blockize the subregion
-    C = sch.get_block("C")
-    i, j, k = sch.get_loops(C)
-    i0, i1 = sch.split(i, [None, 128])
-    j0, j1 = sch.split(j, [None, 128])
-    k0, k1 = sch.split(k, [None, 32])
-    sch.reorder(i0, j0, k0, i1, j1, k1)
-    CTA = sch.blockize(i1)
-
-    # schedule the things inside microkernel
-    i2, i3 = sch.split(i1, [None, 16])
-    j2, j3 = sch.split(j1, [None, 16])
-    k2, k3 = sch.split(k1, [None, 16])
-    sch.reorder(i2, j2, k2, i3, j3, k3)
-    C = sch.blockize(i3)
-    # sch.tensorize(block_or_loop=i3, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
-
-    # cache read / write
-    A_wmma = sch.cache_read(C, 1, "wmma.matrix_a")
-    B_wmma = sch.cache_read(C, 2, "wmma.matrix_b")
-    C_wmma = sch.cache_write(C, 0, "wmma.accumulator")
-
-    # apply tensor intrinsics
-    b = sch.get_block("A_wmma.matrix_a")
-    l1, l2 = sch.get_loops(b)
-    l11, l12 = sch.split(l1, [None, 16])
-    l21, l22 = sch.split(l2, [None, 16])
-    sch.reorder(l11, l21, l12, l22)
-    # sch.tensorize(block_or_loop=l12, tensor_intrin="wmma_load_16x16x16_f16_a")
-    sch.blockize(loop=l12)
-
-    b = sch.get_block("B_wmma.matrix_b")
-    l1, l2 = sch.get_loops(b)
-    l11, l12 = sch.split(l1, [None, 16])
-    l21, l22 = sch.split(l2, [None, 16])
-    sch.reorder(l11, l21, l12, l22)
-    # sch.tensorize(block_or_loop=l12, tensor_intrin="wmma_load_16x16x16_f16_b")
-    sch.blockize(loop=l12)
-
-    b = sch.get_block("C_wmma.accumulator")
-    l1, l2 = sch.get_loops(b)
-    l11, l12 = sch.split(l1, [None, 16])
-    l21, l22 = sch.split(l2, [None, 16])
-    sch.reorder(l11, l21, l12, l22)
-    # sch.tensorize(block_or_loop=l12, tensor_intrin="wmma_store_16x16x16_f16_shared")
-    sch.blockize(loop=l12)
+def schedule_matmul(sch):
+    pass
 
 
 def test(build=False):
