@@ -15,6 +15,7 @@ Test with this branch with no hacks. (previous hacks in dyn-shape)
 
 import numpy as np
 import torch
+from microkernel import Microkernel_128x128x32
 
 import tvm
 from tvm import meta_schedule as ms
@@ -110,5 +111,8 @@ def test(build=False):
 
 
 if __name__ == "__main__":
+    """
     optimized_mod = tune_microkernel(microkernel)
     optimized_mod.show()
+    """
+    test()
