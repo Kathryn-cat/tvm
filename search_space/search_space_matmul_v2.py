@@ -40,6 +40,18 @@ def microkernel(
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
+def tune_microkernel(mod):
+    target = tvm.target.Target("nvidia/geforce-rtx-3090")
+    with ms.Profiler() as profiler:
+        sch: tvm.tir.Schedule = ms.tune_tir(
+            mod=mod,
+            target=target,
+            num_trials_per_iter=32,
+            max_trials_global=1000,
+            work_dir="logs",
+        )
+
+
 @T.prim_func
 def matmul(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
@@ -84,4 +96,4 @@ def test(build=False):
 
 
 if __name__ == "__main__":
-    test()
+    tune_microkernel(microkernel)
