@@ -15,6 +15,7 @@ Test with this branch with no hacks. (previous hacks in dyn-shape)
 
 import numpy as np
 import torch
+from handcrafted_dyn_ir import MatmulModule
 from microkernel import Microkernel_128x128x32
 
 import tvm
@@ -674,9 +675,24 @@ def test_static(build=False):
         print("matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
 
 
+def test_perf_diff():
+    matmul_mod = tvm.build(MatmulModule, target="cuda")
+    dev = tvm.cuda(0)
+    A_np = np.random.uniform(size=(1024, 512)).astype("float16")
+    B_np = np.random.uniform(size=(512, 1024)).astype("float16")
+    A_nd = tvm.nd.array(A_np, dev)
+    B_nd = tvm.nd.array(B_np, dev)
+    C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+    # measure running time
+    num_flop = 2 * 1024 * 512 * 1024
+    evaluator = matmul_mod.time_evaluator("matmul_module", dev, number=10)
+    print("matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1).mean / 1e9))
+
+
 if __name__ == "__main__":
     """
     optimized_mod = tuning(staticMatmul)
     optimized_mod.show()
     """
-    test(build=True)
+    # test(build=True)
+    test_perf_diff()
