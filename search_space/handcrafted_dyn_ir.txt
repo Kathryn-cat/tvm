@@ -91,11 +91,11 @@ class MatmulModule:
                                     A_2 = T.match_buffer(B_shared[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], [16, 16], dtype="float16", strides=[s1_1, s0_1], scope="shared", offset_factor=16)
                                     C_3 = T.match_buffer(B_shared_wmma_matrix_b[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], [16, 16], dtype="float16", strides=[d1_2, d0_2], scope="wmma.matrix_b", offset_factor=16)
                                     T.evaluate(T.tvm_load_matrix_sync(C_3.data, 16, 16, 16, C_3.elem_offset // d1_2 // 16 * (d1_2 // 16) + C_3.elem_offset % d1_2 // 16, T.tvm_access_ptr(T.type_annotation(dtype="float16"), A_2.data, A_2.elem_offset, s1_1 * 16, 1, dtype="handle"), s1_1, "row_major", dtype="handle"))
-                            for i_0_3, j_0_3, k_0_2, i_0_4, j_0_4 in T.grid(1, 1, 2, 1, 1):
+                            for ax0_0_3, ax1_0_3, ax2_0_2, ax0_0_4, ax1_0_4 in T.grid(1, 1, 2, 1, 1):
                                 with T.block("C_o_update"):
-                                    vi_o = T.axis.spatial(64, ax0_0_0_ax1_0_0_fused // 64 * 8 + ax0_0_0_ax1_0_0_fused % 64 // 8 + i_0_3 + i_0_4)
-                                    vj_o = T.axis.spatial(64, j_0_4 + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + j_0_3)
-                                    vk_o = T.axis.reduce(2 * (n * 16), ax2_0_0 * 2 + ax2_0_1 * 2 + k_0_2)
+                                    vi_o = T.axis.spatial(64, ax0_0_0_ax1_0_0_fused // 64 * 8 + ax0_0_0_ax1_0_0_fused % 64 // 8 + ax0_0_3 + ax0_0_4)
+                                    vj_o = T.axis.spatial(64, ax1_0_4 + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3)
+                                    vk_o = T.axis.reduce(2 * (n * 16), ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2)
                                     T.reads(C_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], A_shared_wmma_matrix_a[vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16], B_shared_wmma_matrix_b[vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
                                     T.writes(C_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
                                     T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":1, "warp_execution":1})

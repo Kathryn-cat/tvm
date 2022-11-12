@@ -307,25 +307,27 @@ class MatmulModule:
                                             dtype="handle",
                                         )
                                     )
-                            for i_0_3, j_0_3, k_0_2, i_0_4, j_0_4 in T.grid(1, 1, 2, 1, 1):
+                            for ax0_0_3, ax1_0_3, ax2_0_2, ax0_0_4, ax1_0_4 in T.grid(
+                                1, 1, 2, 1, 1
+                            ):
                                 with T.block("C_o_update"):
                                     vi_o = T.axis.spatial(
                                         64,
                                         ax0_0_0_ax1_0_0_fused // 64 * 8
                                         + ax0_0_0_ax1_0_0_fused % 64 // 8
-                                        + i_0_3
-                                        + i_0_4,
+                                        + ax0_0_3
+                                        + ax0_0_4,
                                     )
                                     vj_o = T.axis.spatial(
                                         64,
-                                        j_0_4
+                                        ax1_0_4
                                         + ax0_0_0_ax1_0_0_fused % 8 * 8
                                         + ax0_0_1_ax1_0_1_fused * 2
                                         + ax0_0_2_ax1_0_2_fused
-                                        + j_0_3,
+                                        + ax1_0_3,
                                     )
                                     vk_o = T.axis.reduce(
-                                        2 * (n * 16), ax2_0_0 * 2 + ax2_0_1 * 2 + k_0_2
+                                        2 * (n * 16), ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2
                                     )
                                     T.reads(
                                         C_shared_wmma_accumulator[
