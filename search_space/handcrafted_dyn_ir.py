@@ -52,11 +52,7 @@ class MatmulModule:
                     ):
                         with T.block("C_o_init"):
                             vi_o = T.axis.spatial(
-                                64,
-                                ax0_0_0_ax1_0_0_fused // 64 * 8
-                                + ax0_0_0_ax1_0_0_fused % 64 // 8
-                                + ax0_0_3_init
-                                + ax0_0_4_init,
+                                64, ax0_0_0_ax1_0_0_fused // 8 + ax0_0_3_init + ax0_0_4_init
                             )
                             vj_o = T.axis.spatial(
                                 64,
@@ -312,11 +308,7 @@ class MatmulModule:
                             ):
                                 with T.block("C_o_update"):
                                     vi_o = T.axis.spatial(
-                                        64,
-                                        ax0_0_0_ax1_0_0_fused // 64 * 8
-                                        + ax0_0_0_ax1_0_0_fused % 64 // 8
-                                        + ax0_0_3
-                                        + ax0_0_4,
+                                        64, ax0_0_0_ax1_0_0_fused // 8 + ax0_0_3 + ax0_0_4
                                     )
                                     vj_o = T.axis.spatial(
                                         64,
