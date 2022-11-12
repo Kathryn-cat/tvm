@@ -40,7 +40,7 @@ class MatmulModule:
                 for ax0_0_2_ax1_0_2_fused in T.thread_binding(2, thread="threadIdx.y"):
                     for ax0_0_3_init, ax1_0_3_init, ax0_0_4_init, ax1_0_4_init in T.grid(1, 1, 1, 1):
                         with T.block("C_o_init"):
-                            vi_o = T.axis.spatial(64, ax0_0_0_ax1_0_0_fused // 8 + ax0_0_3_init + ax0_0_4_init)
+                            vi_o = T.axis.spatial(64, ax0_0_3_init + ax0_0_4_init + ax0_0_0_ax1_0_0_fused // 8)
                             vj_o = T.axis.spatial(64, ax1_0_4_init + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3_init)
                             T.reads()
                             T.writes(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
@@ -93,7 +93,7 @@ class MatmulModule:
                                     T.evaluate(T.tvm_load_matrix_sync(C_3.data, 16, 16, 16, C_3.elem_offset // d1_2 // 16 * (d1_2 // 16) + C_3.elem_offset % d1_2 // 16, T.tvm_access_ptr(T.type_annotation(dtype="float16"), A_2.data, A_2.elem_offset, s1_1 * 16, 1, dtype="handle"), s1_1, "row_major", dtype="handle"))
                             for ax0_0_3, ax1_0_3, ax2_0_2, ax0_0_4, ax1_0_4 in T.grid(1, 1, 2, 1, 1):
                                 with T.block("C_o_update"):
-                                    vi_o = T.axis.spatial(64, ax0_0_0_ax1_0_0_fused // 8 + ax0_0_3 + ax0_0_4)
+                                    vi_o = T.axis.spatial(64, ax0_0_3 + ax0_0_4 + ax0_0_0_ax1_0_0_fused // 8)
                                     vj_o = T.axis.spatial(64, ax1_0_4 + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3)
                                     vk_o = T.axis.reduce(n * 32, ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2)
                                     T.reads(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], A_reindex_shared_wmma_matrix_a[vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16], B_reindex_shared_wmma_matrix_b[vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
