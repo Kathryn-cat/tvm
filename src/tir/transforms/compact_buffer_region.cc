@@ -104,6 +104,21 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
   static std::unordered_map<Buffer, Region, ObjectPtrHash, ObjectPtrEqual> Collect(
       const PrimFunc& f) {
     BufferAccessRegionCollector collector;
+    arith::Analyzer* analyzer = &collector.dom_analyzer_;
+    std::map<String, const Var> bindVars;
+    for (auto& item : f->buffer_map) {
+      for (auto& expr : item.second->shape) {
+        PostOrderVisit(expr, [analyzer, &bindVars](const ObjectRef& obj) {
+          if (obj->IsInstance<VarNode>()) {
+            const Var& var = GetRef<Var>(obj.as<VarNode>());
+            if (bindVars.find(var->name_hint) == bindVars.end()) {
+              analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
+              bindVars.insert({var->name_hint, var});
+            }
+          }
+        });
+      }
+    }
     collector(f->body);
     return std::move(collector.buffer_access_region_);
   }
