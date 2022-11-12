@@ -324,7 +324,7 @@ def schedule_matmul(sch):
     l214, l215, l216, l217, l218, l219 = sch.get_loops(block=b168)
     b220 = sch.get_block(name="C_o", func_name="main")
     l221, l222, l223, l224, l225, l226, l227, l228, l229, l230 = sch.get_loops(block=b220)
-    b231 = sch.decompose_reduction(block=b220, loop=l223)
+    b231 = sch.decompose_reduction(block=b220, loop=l224)
     sch.unannotate(block_or_loop=b231, ann_key="meta_schedule.auto_tensorize")
     sch.annotate(
         block_or_loop=b231, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_fill_16x16x16_f16"
