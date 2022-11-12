@@ -41,7 +41,7 @@ def microkernel(
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
-def tune_microkernel(mod):
+def tuning(mod):
     target = tvm.target.Target("nvidia/geforce-rtx-3090")
     with ms.Profiler() as profiler:
         sch: tvm.tir.Schedule = ms.tune_tir(
@@ -74,6 +74,20 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
     B = T.match_buffer(b, (512 * n, 1024), "float16")
     C = T.match_buffer(c, (1024, 1024), "float16")
     for i, j, k in T.grid(1024, 1024, 512 * n):
+        with T.block("C"):
+            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+            with T.init():
+                C[vi, vj] = T.float16(0.0)
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+@T.prim_func
+def staticMatmul(a: T.handle, b: T.handle, c: T.handle) -> None:
+    T.func_attr({"global_symbol": "staticMatmul", "tir.noalias": True})
+    A = T.match_buffer(a, (1024, 512), "float16")
+    B = T.match_buffer(b, (512, 1024), "float16")
+    C = T.match_buffer(c, (1024, 1024), "float16")
+    for i, j, k in T.grid(1024, 1024, 512):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -379,8 +393,6 @@ def test(build=False):
 
 
 if __name__ == "__main__":
-    """
-    optimized_mod = tune_microkernel(microkernel)
+    optimized_mod = tuning(staticMatmul)
     optimized_mod.show()
-    """
-    test(build=True)
+    # test(build=True)
