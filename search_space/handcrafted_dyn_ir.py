@@ -44,27 +44,25 @@ class MatmulModule:
         B_shared_wmma_matrix_b = T.alloc_buffer(
             [512 * n, 1024], dtype="float16", scope="wmma.matrix_b"
         )
-        for i_0_0_j_0_0_fused in T.thread_binding(512, thread="blockIdx.y"):
-            for i_1_0_1_j_1_0_1_fused in T.thread_binding(4, thread="blockIdx.x"):
-                for i_1_0_2_j_1_0_2_fused in T.thread_binding(2, thread="threadIdx.y"):
-                    for i_1_0_3_init, j_1_0_3_init, i_1_0_4_init, j_1_0_4_init in T.grid(
-                        1, 1, 1, 1
-                    ):
+        for i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused in T.thread_binding(512, thread="blockIdx.y"):
+            for i_0_1_j_0_1_fused in T.thread_binding(4, thread="blockIdx.x"):
+                for i_0_2_j_0_2_fused in T.thread_binding(2, thread="threadIdx.y"):
+                    for i_0_3_init, j_0_3_init, i_0_4_init, j_0_4_init in T.grid(1, 1, 1, 1):
                         with T.block("C_o_init"):
                             vi_o = T.axis.spatial(
                                 64,
-                                i_0_0_j_0_0_fused // 64 * 8
-                                + i_0_0_j_0_0_fused % 64 // 8
-                                + i_1_0_3_init
-                                + i_1_0_4_init,
+                                i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 64 * 8
+                                + i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 64 // 8
+                                + i_0_3_init
+                                + i_0_4_init,
                             )
                             vj_o = T.axis.spatial(
                                 64,
-                                j_1_0_4_init
-                                + i_0_0_j_0_0_fused % 8 * 8
-                                + i_1_0_1_j_1_0_1_fused * 2
-                                + i_1_0_2_j_1_0_2_fused
-                                + j_1_0_3_init,
+                                j_0_4_init
+                                + i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 8
+                                + i_0_1_j_0_1_fused * 2
+                                + i_0_2_j_0_2_fused
+                                + j_0_3_init,
                             )
                             T.reads()
                             T.writes(
@@ -101,14 +99,14 @@ class MatmulModule:
                                     dtype="handle",
                                 )
                             )
-                    for k_0_k_1_0_0_fused in T.serial(n * 16):
+                    for k_0_0 in T.serial(n * 16):
                         for ax0_ax1_fused_0 in T.serial(4):
                             for ax0_ax1_fused_1 in T.thread_binding(2, thread="threadIdx.y"):
                                 for ax0_ax1_fused_2 in T.thread_binding(32, thread="threadIdx.x"):
                                     for ax0_ax1_fused_3 in T.vectorized(2):
                                         with T.block("A_shared"):
                                             T.where(
-                                                k_0_k_1_0_0_fused * 32
+                                                k_0_0 * 32
                                                 + (
                                                     (
                                                         (ax0_ax1_fused_0 * 2 + ax0_ax1_fused_1) * 32
@@ -122,7 +120,7 @@ class MatmulModule:
                                             )
                                             v0 = T.axis.spatial(
                                                 1024,
-                                                i_0_0_j_0_0_fused // 8 * 16
+                                                i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 8 * 16
                                                 + (
                                                     ax0_ax1_fused_0 * 128
                                                     + ax0_ax1_fused_1 * 64
@@ -133,7 +131,7 @@ class MatmulModule:
                                             )
                                             v1 = T.axis.spatial(
                                                 512 * n,
-                                                k_0_k_1_0_0_fused * 32
+                                                k_0_0 * 32
                                                 + (
                                                     ax0_ax1_fused_0 * 128
                                                     + ax0_ax1_fused_1 * 64
@@ -152,7 +150,7 @@ class MatmulModule:
                                     for ax0_ax1_fused_3 in T.vectorized(2):
                                         with T.block("B_shared"):
                                             T.where(
-                                                k_0_k_1_0_0_fused * 32
+                                                k_0_0 * 32
                                                 + (
                                                     (
                                                         (ax0_ax1_fused_0 * 2 + ax0_ax1_fused_1) * 32
@@ -166,7 +164,7 @@ class MatmulModule:
                                             )
                                             v0 = T.axis.spatial(
                                                 512 * n,
-                                                k_0_k_1_0_0_fused * 32
+                                                k_0_0 * 32
                                                 + (
                                                     ax0_ax1_fused_0 * 128
                                                     + ax0_ax1_fused_1 * 64
@@ -177,8 +175,8 @@ class MatmulModule:
                                             )
                                             v1 = T.axis.spatial(
                                                 1024,
-                                                i_0_0_j_0_0_fused % 8 * 128
-                                                + i_1_0_1_j_1_0_1_fused * 32
+                                                i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 128
+                                                + i_0_1_j_0_1_fused * 32
                                                 + (
                                                     ax0_ax1_fused_0 * 128
                                                     + ax0_ax1_fused_1 * 64
@@ -191,13 +189,13 @@ class MatmulModule:
                                             T.writes(B_shared[v0, v1])
                                             T.block_attr({"buffer_dim_align": [[0, 0, 32, 8]]})
                                             B_shared[v0, v1] = B[v0, v1]
-                        for k_1_0_1 in T.serial(1):
+                        for k_0_1 in T.serial(1):
                             for ax0_0, ax1_0 in T.grid(1, 2):
                                 with T.block("A_shared_wmma.matrix_a_o"):
-                                    v0_o = T.axis.spatial(64, i_0_0_j_0_0_fused // 8)
-                                    v1_o = T.axis.spatial(
-                                        2 * (n * 16), k_0_k_1_0_0_fused * 2 + ax1_0
+                                    v0_o = T.axis.spatial(
+                                        64, i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 8
                                     )
+                                    v1_o = T.axis.spatial(2 * (n * 16), k_0_0 * 2 + ax1_0)
                                     T.reads(
                                         A_shared[
                                             v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
@@ -251,14 +249,12 @@ class MatmulModule:
                                     )
                             for ax0_0, ax1_0 in T.grid(2, 1):
                                 with T.block("B_shared_wmma.matrix_b_o"):
-                                    v0_o = T.axis.spatial(
-                                        2 * (n * 16), k_0_k_1_0_0_fused * 2 + ax0_0
-                                    )
+                                    v0_o = T.axis.spatial(2 * (n * 16), k_0_0 * 2 + ax0_0)
                                     v1_o = T.axis.spatial(
                                         64,
-                                        i_0_0_j_0_0_fused % 8 * 8
-                                        + i_1_0_1_j_1_0_1_fused * 2
-                                        + i_1_0_2_j_1_0_2_fused,
+                                        i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 8
+                                        + i_0_1_j_0_1_fused * 2
+                                        + i_0_2_j_0_2_fused,
                                     )
                                     T.reads(
                                         B_shared[
@@ -311,27 +307,25 @@ class MatmulModule:
                                             dtype="handle",
                                         )
                                     )
-                            for i_1_0_3, j_1_0_3, k_1_0_2, i_1_0_4, j_1_0_4 in T.grid(
-                                1, 1, 2, 1, 1
-                            ):
+                            for i_0_3, j_0_3, k_0_2, i_0_4, j_0_4 in T.grid(1, 1, 2, 1, 1):
                                 with T.block("C_o_update"):
                                     vi_o = T.axis.spatial(
                                         64,
-                                        i_0_0_j_0_0_fused // 64 * 8
-                                        + i_0_0_j_0_0_fused % 64 // 8
-                                        + i_1_0_3
-                                        + i_1_0_4,
+                                        i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 64 * 8
+                                        + i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 64 // 8
+                                        + i_0_3
+                                        + i_0_4,
                                     )
                                     vj_o = T.axis.spatial(
                                         64,
-                                        j_1_0_4
-                                        + i_0_0_j_0_0_fused % 8 * 8
-                                        + i_1_0_1_j_1_0_1_fused * 2
-                                        + i_1_0_2_j_1_0_2_fused
-                                        + j_1_0_3,
+                                        j_0_4
+                                        + i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 8
+                                        + i_0_1_j_0_1_fused * 2
+                                        + i_0_2_j_0_2_fused
+                                        + j_0_3,
                                     )
                                     vk_o = T.axis.reduce(
-                                        2 * (n * 16), k_0_k_1_0_0_fused * 2 + k_1_0_1 * 2 + k_1_0_2
+                                        2 * (n * 16), k_0_0 * 2 + k_0_1 * 2 + k_0_2
                                     )
                                     T.reads(
                                         C_shared_wmma_accumulator[
@@ -405,12 +399,14 @@ class MatmulModule:
                                     )
                     for ax0_0, ax1_0 in T.grid(1, 1):
                         with T.block("C_shared_wmma.accumulator_o"):
-                            v0_o = T.axis.spatial(64, i_0_0_j_0_0_fused // 8)
+                            v0_o = T.axis.spatial(
+                                64, i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 8
+                            )
                             v1_o = T.axis.spatial(
                                 64,
-                                i_0_0_j_0_0_fused % 8 * 8
-                                + i_1_0_1_j_1_0_1_fused * 2
-                                + i_1_0_2_j_1_0_2_fused,
+                                i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 8
+                                + i_0_1_j_0_1_fused * 2
+                                + i_0_2_j_0_2_fused,
                             )
                             T.reads(
                                 C_shared_wmma_accumulator[
@@ -464,11 +460,13 @@ class MatmulModule:
                         for ax1_2 in T.thread_binding(32, thread="threadIdx.x"):
                             with T.block("C_shared"):
                                 T.where((ax1_0 * 2 + ax1_1) * 32 + ax1_2 < 32)
-                                v0 = T.axis.spatial(1024, i_0_0_j_0_0_fused // 8 * 16 + ax0)
+                                v0 = T.axis.spatial(
+                                    1024, i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused // 8 * 16 + ax0
+                                )
                                 v1 = T.axis.spatial(
                                     1024,
-                                    i_0_0_j_0_0_fused % 8 * 128
-                                    + i_1_0_1_j_1_0_1_fused * 32
+                                    i_0_i_1_0_0_j_1_0_0_fused_fused_j_0_fused % 8 * 128
+                                    + i_0_1_j_0_1_fused * 32
                                     + (ax1_0 * 64 + ax1_1 * 32 + ax1_2),
                                 )
                                 T.reads(C_shared[v0, v1])
