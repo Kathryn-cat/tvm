@@ -175,7 +175,7 @@ def schedule_matmul(sch):
         ann_val="wmma_fill_16x16x16_f16",
     )
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
-    _, _, _, l21, l22, l23 = sch.get_loops(block=b20)
+    i, j, k, l21, l22, l23 = sch.get_loops(block=b20)
     v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
         loop=l21, n=5, max_innermost_factor=4, decision=[8, 1, 1, 1, 1]
     )
@@ -192,21 +192,24 @@ def schedule_matmul(sch):
         loop=l23, n=3, max_innermost_factor=4, decision=[1, 1, 2]
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
-    sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
-    # TODO: thread / block idx
+    # TODO: for now, do not sample for blockidx
+    sch.reorder(i, l29, l39, j, l30, l40, l31, l41, k, l47, l48, l32, l42, l49, l33, l43)
     l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
-    # sch.bind(loop=l50, thread_axis="blockIdx.y") # merge this with outer loop
+    l50_1 = sch.fuse(i, l50, preserve_unit_iters=True)
+    sch.bind(loop=l50_1, thread_axis="blockIdx.y")  # merge this with outer loop
     l51 = sch.fuse(l30, l40, preserve_unit_iters=True)
-    # sch.bind(loop=l51, thread_axis="blockIdx.x") # merge this with outer loop
+    l51_1 = sch.fuse(j, l51, preserve_unit_iters=True)
+    sch.bind(loop=l51_1, thread_axis="blockIdx.x")  # merge this with outer loop
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
-    # sch.bind(loop=l52, thread_axis="threadIdx.y") # merge this with outer loop
+    sch.bind(loop=l52, thread_axis="threadIdx.y")  # merge this with outer loop
+    l47_1 = sch.fuse(k, l47, preserve_unit_iters=True)
 
     sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=1)
     sch.annotate(
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
+    sch.reverse_compute_at(block=b53, loop=l51_1, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
@@ -214,10 +217,10 @@ def schedule_matmul(sch):
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     # sch.reverse_compute_inline(block=b2) - no use
-    _, _, _, l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
+    l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
-    _, _, _, l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
+    l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
     b72 = sch.blockize(loop=l64)
     sch.annotate(
@@ -228,8 +231,8 @@ def schedule_matmul(sch):
     b73 = sch.cache_read(
         block=b20, read_buffer_index=0, storage_scope="shared", consumer_blocks=[b20]
     )
-    sch.compute_at(block=b73, loop=l47, preserve_unit_loops=True, index=-1)
-    _, _, _, l74, l75, l76, l77, l78, l79 = sch.get_loops(block=b73)
+    sch.compute_at(block=b73, loop=l47_1, preserve_unit_loops=True, index=-1)
+    l74, l75, l76, l77, l78, l79 = sch.get_loops(block=b73)
     l80 = sch.fuse(l78, l79, preserve_unit_iters=True)
     v81 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=1
@@ -238,8 +241,8 @@ def schedule_matmul(sch):
     b82 = sch.cache_read(
         block=b20, read_buffer_index=1, storage_scope="shared", consumer_blocks=[b20]
     )
-    sch.compute_at(block=b82, loop=l47, preserve_unit_loops=True, index=-1)
-    _, _, _, l83, l84, l85, l86, l87, l88 = sch.get_loops(block=b82)
+    sch.compute_at(block=b82, loop=l47_1, preserve_unit_loops=True, index=-1)
+    l83, l84, l85, l86, l87, l88 = sch.get_loops(block=b82)
     l89 = sch.fuse(l87, l88, preserve_unit_iters=True)
     v90 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=1
@@ -247,10 +250,10 @@ def schedule_matmul(sch):
     sch.annotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch", ann_val=v90)
     b91 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="wmma.matrix_a")
     sch.compute_at(block=b91, loop=l48, preserve_unit_loops=True, index=-1)
-    _, _, _, l92, l93, l94, l95, l96, l97, l98 = sch.get_loops(block=b91)
+    l92, l93, l94, l95, l96, l97, l98 = sch.get_loops(block=b91)
     l99, l100 = sch.split(loop=l98, factors=[None, 16], preserve_unit_iters=True)
     l101, l102 = sch.split(loop=l97, factors=[None, 16], preserve_unit_iters=True)
-    _, _, _, l103, l104, l105, l106, l107, l108, l109, l110, l111 = sch.get_loops(block=b91)
+    l103, l104, l105, l106, l107, l108, l109, l110, l111 = sch.get_loops(block=b91)
     sch.reorder(l110, l102, l100)
     b112 = sch.blockize(loop=l102)
     sch.annotate(
@@ -260,10 +263,10 @@ def schedule_matmul(sch):
     )
     b113 = sch.cache_read(block=b20, read_buffer_index=1, storage_scope="wmma.matrix_b")
     sch.compute_at(block=b113, loop=l48, preserve_unit_loops=True, index=-1)
-    _, _, _, l114, l115, l116, l117, l118, l119, l120 = sch.get_loops(block=b113)
+    l114, l115, l116, l117, l118, l119, l120 = sch.get_loops(block=b113)
     l121, l122 = sch.split(loop=l120, factors=[None, 16], preserve_unit_iters=True)
     l123, l124 = sch.split(loop=l119, factors=[None, 16], preserve_unit_iters=True)
-    _, _, _, l125, l126, l127, l128, l129, l130, l131, l132, l133 = sch.get_loops(block=b113)
+    l125, l126, l127, l128, l129, l130, l131, l132, l133 = sch.get_loops(block=b113)
     sch.reorder(l132, l124, l122)
     b134 = sch.blockize(loop=l124)
     sch.annotate(
@@ -289,12 +292,12 @@ def schedule_matmul(sch):
     sch.annotate(block_or_loop=b1, ann_key="meta_schedule.unroll_explicit", ann_val=v135)
     sch.enter_postproc()
     sch.unannotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch")
-    _, _, _, l136, l137, l138, l139 = sch.get_loops(block=b53)
+    l136, l137, l138, l139 = sch.get_loops(block=b53)
     l140, l141, l142 = sch.split(loop=l139, factors=[None, 2, 32], preserve_unit_iters=True)
     sch.bind(loop=l142, thread_axis="threadIdx.x")
     sch.bind(loop=l141, thread_axis="threadIdx.y")
     sch.unannotate(block_or_loop=b73, ann_key="meta_schedule.cooperative_fetch")
-    _, _, _, l143, l144, l145, l146, l147 = sch.get_loops(block=b73)
+    l143, l144, l145, l146, l147 = sch.get_loops(block=b73)
     l148, l149, l150, l151 = sch.split(
         loop=l147, factors=[None, 2, 32, 2], preserve_unit_iters=True
     )
@@ -302,7 +305,7 @@ def schedule_matmul(sch):
     sch.bind(loop=l150, thread_axis="threadIdx.x")
     sch.bind(loop=l149, thread_axis="threadIdx.y")
     sch.unannotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch")
-    _, _, _, l152, l153, l154, l155, l156 = sch.get_loops(block=b82)
+    l152, l153, l154, l155, l156 = sch.get_loops(block=b82)
     l157, l158, l159, l160 = sch.split(
         loop=l156, factors=[None, 2, 32, 2], preserve_unit_iters=True
     )
@@ -312,18 +315,16 @@ def schedule_matmul(sch):
     b161 = sch.get_block(name="root", func_name="main")
     sch.unannotate(block_or_loop=b161, ann_key="meta_schedule.unroll_explicit")
     b162, b163, b164, b165, b166, b167, b168 = sch.get_child_blocks(b161)
-    _, _, _, l169, l170, l171, l172, l173, l174, l175, l176 = sch.get_loops(block=b162)
-    _, _, _, l177, l178, l179, l180, l181, l182, l183, l184 = sch.get_loops(block=b163)
-    _, _, _, l185, l186, l187, l188, l189, l190, l191 = sch.get_loops(block=b164)
-    _, _, _, l192, l193, l194, l195, l196, l197, l198 = sch.get_loops(block=b165)
-    _, _, _, l199, l200, l201, l202, l203, l204, l205, l206, l207, l208 = sch.get_loops(block=b166)
-    _, _, _, l209, l210, l211, l212, l213 = sch.get_loops(block=b167)
-    _, _, _, l214, l215, l216, l217, l218, l219 = sch.get_loops(block=b168)
+    l169, l170, l171, l172, l173, l174, l175, l176 = sch.get_loops(block=b162)
+    l177, l178, l179, l180, l181, l182, l183, l184 = sch.get_loops(block=b163)
+    l185, l186, l187, l188, l189, l190, l191 = sch.get_loops(block=b164)
+    l192, l193, l194, l195, l196, l197, l198 = sch.get_loops(block=b165)
+    l199, l200, l201, l202, l203, l204, l205, l206, l207, l208 = sch.get_loops(block=b166)
+    l209, l210, l211, l212, l213 = sch.get_loops(block=b167)
+    l214, l215, l216, l217, l218, l219 = sch.get_loops(block=b168)
     b220 = sch.get_block(name="C_o", func_name="main")
-    _, _, l, l221, l222, l223, l224, l225, l226, l227, l228, l229, l230 = sch.get_loops(block=b220)
-    # TODO: fix this
-    b231 = sch.decompose_reduction(block=b220, loop=l)
-    """
+    l221, l222, l223, l224, l225, l226, l227, l228, l229, l230 = sch.get_loops(block=b220)
+    b231 = sch.decompose_reduction(block=b220, loop=l223)
     sch.unannotate(block_or_loop=b231, ann_key="meta_schedule.auto_tensorize")
     sch.annotate(
         block_or_loop=b231, ann_key="meta_schedule.auto_tensorize", ann_val="wmma_fill_16x16x16_f16"
@@ -333,7 +334,6 @@ def schedule_matmul(sch):
     b232 = sch.get_block(name="C_o_init", func_name="main")
     sch.unannotate(block_or_loop=b232, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b232, tensor_intrin="wmma_fill_16x16x16_f16")
-    """
     b233 = sch.get_block(name="A_shared_wmma.matrix_a_o", func_name="main")
     sch.unannotate(block_or_loop=b233, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b233, tensor_intrin="wmma_load_16x16x16_f16_a")
