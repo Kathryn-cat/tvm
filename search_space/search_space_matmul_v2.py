@@ -678,4 +678,4 @@ if __name__ == "__main__":
     optimized_mod = tuning(staticMatmul)
     optimized_mod.show()
     """
-    test_static(build=True)
+    test(build=True)
