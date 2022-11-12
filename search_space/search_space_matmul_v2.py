@@ -354,11 +354,11 @@ def test(build=False):
     sch.mod.show()
 
     if build:
-        matmul_mod = tvm.build(sch.mod, target="llvm")
+        matmul_mod = tvm.build(sch.mod, target="cuda")
 
         # testing
-        # dev = tvm.cuda(0)
-        dev = tvm.cpu()
+        dev = tvm.cuda(0)
+        # dev = tvm.cpu()
         A_np = np.random.uniform(size=(1024, 512)).astype("float16")
         B_np = np.random.uniform(size=(512, 1024)).astype("float16")
         A_nd = tvm.nd.array(A_np, dev)
@@ -378,4 +378,4 @@ if __name__ == "__main__":
     optimized_mod = tune_microkernel(microkernel)
     optimized_mod.show()
     """
-    test()
+    test(build=True)
