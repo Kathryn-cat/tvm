@@ -320,9 +320,9 @@ def schedule_matmul(sch):
     _, _, _, l209, l210, l211, l212, l213 = sch.get_loops(block=b167)
     _, _, _, l214, l215, l216, l217, l218, l219 = sch.get_loops(block=b168)
     b220 = sch.get_block(name="C_o", func_name="main")
-    _, _, _, l221, l222, l223, l224, l225, l226, l227, l228, l229, l230 = sch.get_loops(block=b220)
+    _, _, l, l221, l222, l223, l224, l225, l226, l227, l228, l229, l230 = sch.get_loops(block=b220)
     # TODO: fix this
-    # b231 = sch.decompose_reduction(block=b220, loop=l224)
+    b231 = sch.decompose_reduction(block=b220, loop=l)
     """
     sch.unannotate(block_or_loop=b231, ann_key="meta_schedule.auto_tensorize")
     sch.annotate(
@@ -340,9 +340,9 @@ def schedule_matmul(sch):
     b234 = sch.get_block(name="B_shared_wmma.matrix_b_o", func_name="main")
     sch.unannotate(block_or_loop=b234, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b234, tensor_intrin="wmma_load_16x16x16_f16_b")
-    b235 = sch.get_block(name="C", func_name="main")
-    # sch.unannotate(block_or_loop=b235, ann_key="meta_schedule.auto_tensorize")
-    sch.tensorize(block_or_loop=b235, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
+    b235 = sch.get_block(name="C_o_update", func_name="main")
+    sch.unannotate(block_or_loop=b235, ann_key="meta_schedule.auto_tensorize")
+    sch.tensorize(block_or_loop=b235, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
     b236 = sch.get_block(name="C_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b236, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b236, tensor_intrin="wmma_store_16x16x16_f16_shared")
