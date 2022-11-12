@@ -51,10 +51,10 @@ class MatmulModule:
                         1, 1, 1, 1
                     ):
                         with T.block("C_o_init"):
-                            vi_o = T.axis.spatial(
+                            v0_o = T.axis.spatial(
                                 64, ax0_0_3_init + ax0_0_4_init + ax0_0_0_ax1_0_0_fused // 8
                             )
-                            vj_o = T.axis.spatial(
+                            v1_o = T.axis.spatial(
                                 64,
                                 ax1_0_4_init
                                 + ax0_0_0_ax1_0_0_fused % 8 * 8
@@ -65,7 +65,7 @@ class MatmulModule:
                             T.reads()
                             T.writes(
                                 C_reindex_shared_wmma_accumulator[
-                                    vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                    v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                 ]
                             )
                             T.block_attr(
@@ -77,7 +77,7 @@ class MatmulModule:
                             )
                             C_1 = T.match_buffer(
                                 C_reindex_shared_wmma_accumulator[
-                                    vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                    v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                 ],
                                 [16, 16],
                                 dtype="float16",
@@ -307,10 +307,10 @@ class MatmulModule:
                                 1, 1, 2, 1, 1
                             ):
                                 with T.block("C_o_update"):
-                                    vi_o = T.axis.spatial(
+                                    v0_o = T.axis.spatial(
                                         64, ax0_0_3 + ax0_0_4 + ax0_0_0_ax1_0_0_fused // 8
                                     )
-                                    vj_o = T.axis.spatial(
+                                    v1_o = T.axis.spatial(
                                         64,
                                         ax1_0_4
                                         + ax0_0_0_ax1_0_0_fused % 8 * 8
@@ -318,23 +318,23 @@ class MatmulModule:
                                         + ax0_0_2_ax1_0_2_fused
                                         + ax1_0_3,
                                     )
-                                    vk_o = T.axis.reduce(
+                                    v2_o = T.axis.reduce(
                                         n * 32, ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2
                                     )
                                     T.reads(
                                         C_reindex_shared_wmma_accumulator[
-                                            vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                            v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                         ],
                                         A_reindex_shared_wmma_matrix_a[
-                                            vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16
+                                            v0_o * 16 : v0_o * 16 + 16, v2_o * 16 : v2_o * 16 + 16
                                         ],
                                         B_reindex_shared_wmma_matrix_b[
-                                            vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                            v2_o * 16 : v2_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                         ],
                                     )
                                     T.writes(
                                         C_reindex_shared_wmma_accumulator[
-                                            vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                            v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                         ]
                                     )
                                     T.block_attr(
@@ -346,7 +346,7 @@ class MatmulModule:
                                     )
                                     A_3 = T.match_buffer(
                                         A_reindex_shared_wmma_matrix_a[
-                                            vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16
+                                            v0_o * 16 : v0_o * 16 + 16, v2_o * 16 : v2_o * 16 + 16
                                         ],
                                         [16, 16],
                                         dtype="float16",
@@ -356,7 +356,7 @@ class MatmulModule:
                                     )
                                     B_1 = T.match_buffer(
                                         B_reindex_shared_wmma_matrix_b[
-                                            vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                            v2_o * 16 : v2_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                         ],
                                         [16, 16],
                                         dtype="float16",
@@ -366,7 +366,7 @@ class MatmulModule:
                                     )
                                     C_4 = T.match_buffer(
                                         C_reindex_shared_wmma_accumulator[
-                                            vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16
+                                            v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
                                         ],
                                         [16, 16],
                                         dtype="float16",

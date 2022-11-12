@@ -40,12 +40,12 @@ class MatmulModule:
                 for ax0_0_2_ax1_0_2_fused in T.thread_binding(2, thread="threadIdx.y"):
                     for ax0_0_3_init, ax1_0_3_init, ax0_0_4_init, ax1_0_4_init in T.grid(1, 1, 1, 1):
                         with T.block("C_o_init"):
-                            vi_o = T.axis.spatial(64, ax0_0_3_init + ax0_0_4_init + ax0_0_0_ax1_0_0_fused // 8)
-                            vj_o = T.axis.spatial(64, ax1_0_4_init + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3_init)
+                            v0_o = T.axis.spatial(64, ax0_0_3_init + ax0_0_4_init + ax0_0_0_ax1_0_0_fused // 8)
+                            v1_o = T.axis.spatial(64, ax1_0_4_init + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3_init)
                             T.reads()
-                            T.writes(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
+                            T.writes(C_reindex_shared_wmma_accumulator[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16])
                             T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":1, "warp_execution":1})
-                            C_1 = T.match_buffer(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], [16, 16], dtype="float16", strides=[d1, d0], scope="wmma.accumulator", offset_factor=16)
+                            C_1 = T.match_buffer(C_reindex_shared_wmma_accumulator[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], [16, 16], dtype="float16", strides=[d1, d0], scope="wmma.accumulator", offset_factor=16)
                             T.evaluate(T.tvm_fill_fragment(C_1.data, 16, 16, 16, C_1.elem_offset // d1 // 16 * (d1 // 16) + C_1.elem_offset % d1 // 16, T.float32(0), dtype="handle"))
                     for ax2_0_0 in T.serial(n * 16):
                         for ax0_ax1_fused_0 in T.serial(4):
@@ -93,15 +93,15 @@ class MatmulModule:
                                     T.evaluate(T.tvm_load_matrix_sync(C_3.data, 16, 16, 16, C_3.elem_offset // d1_2 // 16 * (d1_2 // 16) + C_3.elem_offset % d1_2 // 16, T.tvm_access_ptr(T.type_annotation(dtype="float16"), A_2.data, A_2.elem_offset, s1_1 * 16, 1, dtype="handle"), s1_1, "row_major", dtype="handle"))
                             for ax0_0_3, ax1_0_3, ax2_0_2, ax0_0_4, ax1_0_4 in T.grid(1, 1, 2, 1, 1):
                                 with T.block("C_o_update"):
-                                    vi_o = T.axis.spatial(64, ax0_0_3 + ax0_0_4 + ax0_0_0_ax1_0_0_fused // 8)
-                                    vj_o = T.axis.spatial(64, ax1_0_4 + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3)
-                                    vk_o = T.axis.reduce(n * 32, ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2)
-                                    T.reads(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], A_reindex_shared_wmma_matrix_a[vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16], B_reindex_shared_wmma_matrix_b[vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
-                                    T.writes(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16])
+                                    v0_o = T.axis.spatial(64, ax0_0_3 + ax0_0_4 + ax0_0_0_ax1_0_0_fused // 8)
+                                    v1_o = T.axis.spatial(64, ax1_0_4 + ax0_0_0_ax1_0_0_fused % 8 * 8 + ax0_0_1_ax1_0_1_fused * 2 + ax0_0_2_ax1_0_2_fused + ax1_0_3)
+                                    v2_o = T.axis.reduce(n * 32, ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2)
+                                    T.reads(C_reindex_shared_wmma_accumulator[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], A_reindex_shared_wmma_matrix_a[v0_o * 16 : v0_o * 16 + 16, v2_o * 16 : v2_o * 16 + 16], B_reindex_shared_wmma_matrix_b[v2_o * 16 : v2_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16])
+                                    T.writes(C_reindex_shared_wmma_accumulator[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16])
                                     T.block_attr({"meta_schedule.thread_extent_high_inclusive":1024, "meta_schedule.thread_extent_low_inclusive":1, "warp_execution":1})
-                                    A_3 = T.match_buffer(A_reindex_shared_wmma_matrix_a[vi_o * 16 : vi_o * 16 + 16, vk_o * 16 : vk_o * 16 + 16], [16, 16], dtype="float16", strides=[a1, a0], scope="wmma.matrix_a", offset_factor=16)
-                                    B_1 = T.match_buffer(B_reindex_shared_wmma_matrix_b[vk_o * 16 : vk_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], [16, 16], dtype="float16", strides=[b1, b0], scope="wmma.matrix_b", offset_factor=16)
-                                    C_4 = T.match_buffer(C_reindex_shared_wmma_accumulator[vi_o * 16 : vi_o * 16 + 16, vj_o * 16 : vj_o * 16 + 16], [16, 16], dtype="float16", strides=[c1, c0], scope="wmma.accumulator", offset_factor=16)
+                                    A_3 = T.match_buffer(A_reindex_shared_wmma_matrix_a[v0_o * 16 : v0_o * 16 + 16, v2_o * 16 : v2_o * 16 + 16], [16, 16], dtype="float16", strides=[a1, a0], scope="wmma.matrix_a", offset_factor=16)
+                                    B_1 = T.match_buffer(B_reindex_shared_wmma_matrix_b[v2_o * 16 : v2_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], [16, 16], dtype="float16", strides=[b1, b0], scope="wmma.matrix_b", offset_factor=16)
+                                    C_4 = T.match_buffer(C_reindex_shared_wmma_accumulator[v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16], [16, 16], dtype="float16", strides=[c1, c0], scope="wmma.accumulator", offset_factor=16)
                                     T.evaluate(T.tvm_mma_sync(C_4.data, C_4.elem_offset // c1 // 16 * (c1 // 16) + C_4.elem_offset % c1 // 16, A_3.data, A_3.elem_offset // a1 // 16 * (a1 // 16) + A_3.elem_offset % a1 // 16, B_1.data, B_1.elem_offset // b1 // 16 * (b1 // 16) + B_1.elem_offset % b1 // 16, C_4.data, C_4.elem_offset // c1 // 16 * (c1 // 16) + C_4.elem_offset % c1 // 16, dtype="handle"))
                     for ax0_0, ax1_0 in T.grid(1, 1):
                         with T.block("C_reindex_shared_wmma.accumulator_o"):
