@@ -206,14 +206,15 @@ def schedule_matmul(sch):
         loop=l23, n=3, max_innermost_factor=4, decision=[1, 1, 2]
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
-    # TODO: for now, do not sample for blockidx
+    # TODO: check if changing this would change performance
     sch.reorder(i, l29, l39, j, l30, l40, l31, l41, k, l47, l48, l32, l42, l49, l33, l43)
     l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
     l50_1 = sch.fuse(i, l50, preserve_unit_iters=True)
+    l50_1 = sch.fuse(l50_1, j, preserve_unit_iters=True)
     sch.bind(loop=l50_1, thread_axis="blockIdx.y")  # merge this with outer loop
     l51 = sch.fuse(l30, l40, preserve_unit_iters=True)
-    l51_1 = sch.fuse(j, l51, preserve_unit_iters=True)
-    sch.bind(loop=l51_1, thread_axis="blockIdx.x")  # merge this with outer loop
+    # l51_1 = sch.fuse(j, l51, preserve_unit_iters=True)
+    sch.bind(loop=l51, thread_axis="blockIdx.x")  # merge this with outer loop
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
     sch.bind(loop=l52, thread_axis="threadIdx.y")  # merge this with outer loop
     l47_1 = sch.fuse(k, l47, preserve_unit_iters=True)
@@ -223,7 +224,7 @@ def schedule_matmul(sch):
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l51_1, preserve_unit_loops=True, index=-1)
+    sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
