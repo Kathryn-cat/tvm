@@ -103,19 +103,6 @@ class MatmulModule:
                                 for ax0_ax1_fused_2 in T.thread_binding(32, thread="threadIdx.x"):
                                     for ax0_ax1_fused_3 in T.vectorized(2):
                                         with T.block("A_reindex_shared"):
-                                            T.where(
-                                                ax2_0_0 * 32
-                                                + (
-                                                    (
-                                                        (ax0_ax1_fused_0 * 2 + ax0_ax1_fused_1) * 32
-                                                        + ax0_ax1_fused_2
-                                                    )
-                                                    * 2
-                                                    + ax0_ax1_fused_3
-                                                )
-                                                % 32
-                                                < n * 512
-                                            )
                                             v0 = T.axis.spatial(
                                                 1024,
                                                 ax0_0_0_ax1_0_0_fused // 8 * 16
@@ -147,19 +134,6 @@ class MatmulModule:
                                 for ax0_ax1_fused_2 in T.thread_binding(32, thread="threadIdx.x"):
                                     for ax0_ax1_fused_3 in T.vectorized(2):
                                         with T.block("B_reindex_shared"):
-                                            T.where(
-                                                ax2_0_0 * 32
-                                                + (
-                                                    (
-                                                        (ax0_ax1_fused_0 * 2 + ax0_ax1_fused_1) * 32
-                                                        + ax0_ax1_fused_2
-                                                    )
-                                                    * 2
-                                                    + ax0_ax1_fused_3
-                                                )
-                                                // 32
-                                                < n * 512
-                                            )
                                             v0 = T.axis.spatial(
                                                 512 * n,
                                                 ax2_0_0 * 32
