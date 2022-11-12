@@ -191,7 +191,7 @@ class MatmulModule:
                             for ax0_0, ax1_0 in T.grid(1, 2):
                                 with T.block("A_reindex_shared_wmma.matrix_a_o"):
                                     v0_o = T.axis.spatial(64, ax0_0_0_ax1_0_0_fused // 8)
-                                    v1_o = T.axis.spatial(2 * (n * 16), ax2_0_0 * 2 + ax1_0)
+                                    v1_o = T.axis.spatial(n * 32, ax2_0_0 * 2 + ax1_0)
                                     T.reads(
                                         A_reindex_shared[
                                             v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
@@ -245,7 +245,7 @@ class MatmulModule:
                                     )
                             for ax0_0, ax1_0 in T.grid(2, 1):
                                 with T.block("B_reindex_shared_wmma.matrix_b_o"):
-                                    v0_o = T.axis.spatial(2 * (n * 16), ax2_0_0 * 2 + ax0_0)
+                                    v0_o = T.axis.spatial(n * 32, ax2_0_0 * 2 + ax0_0)
                                     v1_o = T.axis.spatial(
                                         64,
                                         ax0_0_0_ax1_0_0_fused % 8 * 8
@@ -319,7 +319,7 @@ class MatmulModule:
                                         + ax1_0_3,
                                     )
                                     vk_o = T.axis.reduce(
-                                        2 * (n * 16), ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2
+                                        n * 32, ax2_0_0 * 2 + ax2_0_1 * 2 + ax2_0_2
                                     )
                                     T.reads(
                                         C_reindex_shared_wmma_accumulator[
