@@ -17,8 +17,10 @@ import numpy as np
 import torch
 from handcrafted_dyn_ir import MatmulModule
 from handcrafted_dyn_ir_n_2 import MatmulModule2
+from handcrafted_dyn_ir_n_3 import MatmulModule3
 from microkernel import Microkernel_128x128x32
 from optimal_ir import StaticMatmulModule
+from optimal_ir_n_3 import StaticMatmulModule3
 
 import tvm
 from tvm import meta_schedule as ms
@@ -87,10 +89,10 @@ def matmul(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
 @T.prim_func
 def staticMatmul(a: T.handle, b: T.handle, c: T.handle) -> None:
     T.func_attr({"global_symbol": "staticMatmul", "tir.noalias": True})
-    A = T.match_buffer(a, (1024, 1024), "float16")
-    B = T.match_buffer(b, (1024, 1024), "float16")
+    A = T.match_buffer(a, (1024, 1536), "float16")
+    B = T.match_buffer(b, (1536, 1024), "float16")
     C = T.match_buffer(c, (1024, 1024), "float16")
-    for i, j, k in T.grid(1024, 1024, 1024):
+    for i, j, k in T.grid(1024, 1024, 1536):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -678,9 +680,7 @@ def test_static(build=False):
 
 
 def test_perf_diff(n=1):
-    sch = tir.Schedule(staticMatmul, debug_mask="all")
-    schedule_matmul_optimal(sch)
-    static_matmul_mod = tvm.build(sch.mod, target="cuda")
+    static_matmul_mod = tvm.build(StaticMatmulModule3, target="cuda")
     dev = tvm.cuda(0)
     A_np = np.random.uniform(size=(1024, n * 512)).astype("float16")
     B_np = np.random.uniform(size=(n * 512, 1024)).astype("float16")
@@ -689,10 +689,16 @@ def test_perf_diff(n=1):
     C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
     # measure running time
     num_flop = 2 * 1024 * n * 512 * 1024
-    evaluator = static_matmul_mod.time_evaluator("staticMatmul", dev, number=10)
+    evaluator = static_matmul_mod.time_evaluator("static_matmul_module_3", dev, number=10)
     print("static matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
 
-    matmul_mod = tvm.build(MatmulModule2, target="cuda")
+    """
+    sch = tir.Schedule(matmul, debug_mask="all")
+    schedule_matmul(sch)
+    sch.mod.show()
+    matmul_mod = tvm.build(sch.mod, target="cuda")
+    """
+    matmul_mod = tvm.build(MatmulModule3, target="cuda")
     dev = tvm.cuda(0)
     A_np = np.random.uniform(size=(1024, n * 512)).astype("float16")
     B_np = np.random.uniform(size=(n * 512, 1024)).astype("float16")
@@ -701,7 +707,8 @@ def test_perf_diff(n=1):
     C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
     # measure running time
     num_flop = 2 * 1024 * n * 512 * 1024
-    evaluator = matmul_mod.time_evaluator("matmul_module_2", dev, number=10)
+    # evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
+    evaluator = matmul_mod.time_evaluator("matmul_module_3", dev, number=10)
     print("matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, n).mean / 1e9))
 
 
@@ -712,4 +719,4 @@ if __name__ == "__main__":
     """
     # test(build=True)
     # test_static(build=True)
-    test_perf_diff(n=2)
+    test_perf_diff(n=3)
