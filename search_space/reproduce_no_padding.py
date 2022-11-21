@@ -169,6 +169,6 @@ def microkernel_tuning(mod):
 
 
 if __name__ == "__main__":
-    mod, trace = microkernel_tuning(ALL_MICROKERNELS[1])
+    mod, trace = microkernel_tuning(ALL_MICROKERNELS[2])
     mod.show()
     print(trace)
