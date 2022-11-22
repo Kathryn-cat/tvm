@@ -190,14 +190,14 @@ def matmul1(
         with T.block("A_pad"):
             vi, vj = T.axis.remap("SS", [i, j])
             A_pad[vi, vj] = T.if_then_else(
-                vi < m and vj < n, A[vi, vj], T.float16(0), dtype="float16"
+                vi < 16 * n and vj < 768, A[vi, vj], T.float16(0), dtype="float16"
             )
     for i, j, k in T.grid(16 * n // d1 * d1, 2304, 768):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
-                C[vi, vj] = T.float16(0.0)
-            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+                C_pad[vi, vj] = T.float16(0.0)
+            C_pad[vi, vj] = C_pad[vi, vj] + A_pad[vi, vk] * B[vk, vj]
     for i, j in T.grid(16 * n, 2304):
         with T.block("C_pad"):
             vi, vj = T.axis.remap("SS", [i, j])
