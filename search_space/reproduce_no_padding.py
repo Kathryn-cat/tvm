@@ -169,20 +169,39 @@ def microkernel_tuning(mod):
 
 
 # matmuls to reproduce DietCode
+# since schedule rules do not handle padding, we modify the IR as below
+# in this file, input is guaranteed to be multiples of microkernel, so no padding is needed
+# padding on the global scope just helps ensure no extra T.where() occurs
 
 
+# d1, d2, d3 are dims of the microkernel, where d2 and d3 are not used
 @T.prim_func
-def matmul1(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
+def matmul1(
+    a: T.handle, b: T.handle, c: T.handle, n: T.int32, d1: T.int32, d2: T.int32, d3: T.int32
+) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
     A = T.match_buffer(a, (16 * n, 768), "float16")
     B = T.match_buffer(b, (768, 2304), "float16")
     C = T.match_buffer(c, (16 * n, 2304), "float16")
-    for i, j, k in T.grid(16 * n, 2304, 768):
+    A_pad = T.alloc_buffer((16 * n // d1 * d1, 768), "float16")
+    C_pad = T.alloc_buffer((16 * n // d1 * d1, 2304), "float16")
+
+    for i, j in T.grid(16 * n // d1 * d1, 768):
+        with T.block("A_pad"):
+            vi, vj = T.axis.remap("SS", [i, j])
+            A_pad[vi, vj] = T.if_then_else(
+                vi < m and vj < n, A[vi, vj], T.float16(0), dtype="float16"
+            )
+    for i, j, k in T.grid(16 * n // d1 * d1, 2304, 768):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
                 C[vi, vj] = T.float16(0.0)
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+    for i, j in T.grid(16 * n, 2304):
+        with T.block("C_pad"):
+            vi, vj = T.axis.remap("SS", [i, j])
+            C[vi, vj] = C_pad[vi, vj]
 
 
 if __name__ == "__main__":
