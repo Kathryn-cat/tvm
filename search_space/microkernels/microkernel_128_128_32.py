@@ -1,3 +1,4 @@
+import tvm
 from tvm.script import tir as T
 
 
@@ -465,10 +466,11 @@ class Microkernel_128_128_32:
 from tvm import tir
 
 
-def apply_trace(sch: tir.Schedule) -> None:
+def sch_128_128_32_part1(sch: tir.Schedule) -> None:
     b0 = sch.get_block(name="C", func_name="main")
     b1 = sch.get_block(name="root", func_name="main")
     sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
+    """
     b2 = sch.reindex(block=b0, buffer=("write", 0))
     b3 = sch.reindex(block=b0, buffer=("read", 0))
     b4 = sch.reindex(block=b0, buffer=("read", 1))
@@ -528,11 +530,13 @@ def apply_trace(sch: tir.Schedule) -> None:
             vk,
         ),
     )
-    l5, l6, l7 = sch.get_loops(block=b0)
+    """
+    b0 = sch.get_block(name="C", func_name="main")
+    _, _, _, l5, l6, l7 = sch.get_loops(block=b0)
     l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
     l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
     l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
-    l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
+    _, _, _, l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
     sch.reorder(l16, l18, l13, l11, l9)
     b20 = sch.blockize(loop=l13)
     sch.annotate(
@@ -546,7 +550,10 @@ def apply_trace(sch: tir.Schedule) -> None:
         ann_val="wmma_fill_16x16x16_f16",
     )
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
-    l21, l22, l23 = sch.get_loops(block=b20)
+
+
+def sch_128_128_32_part2(sch: tir.Schedule) -> None:
+    i, j, k, l21, l22, l23 = sch.get_loops(block=b20)
     v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
         loop=l21, n=5, max_innermost_factor=4, decision=[2, 4, 1, 1, 1]
     )

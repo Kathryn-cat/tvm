@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from microkernels import *
 
 import tvm
 from tvm import meta_schedule as ms
@@ -193,6 +194,8 @@ def schedule_matmul(sch, d1_val, d2_val, d3_val):
     j0, j1 = sch.split(j, [None, d2_val])
     k0, k1 = sch.split(k, [None, d3_val])
     sch.reorder(i0, j0, k0, i1, j1, k1)
+
+    sch_128_128_32_part1(sch)
 
 
 def test(mod, d1_val, d2_val, d3_val, k=1, build=False):
