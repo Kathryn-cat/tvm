@@ -168,40 +168,21 @@ def microkernel_tuning(mod):
     return sch.mod, trace
 
 
-# matmuls to reproduce DietCode
-# since schedule rules do not handle padding, we modify the IR as below
+# reproduce DietCode experiment 1
 # in this file, input is guaranteed to be multiples of microkernel, so no padding is needed
-# padding on the global scope just helps ensure no extra T.where() occurs
-
-
-# d1, d2, d3 are dims of the microkernel, where d2 and d3 are not used
+# assumption is that n is a multiple of 16, so n * 16 = k * 256
 @T.prim_func
-def matmul1(
-    a: T.handle, b: T.handle, c: T.handle, n: T.int32, d1: T.int32, d2: T.int32, d3: T.int32
-) -> None:
+def matmul1(a: T.handle, b: T.handle, c: T.handle, k: T.int32) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (16 * n, 768), "float16")
+    A = T.match_buffer(a, (256 * k, 768), "float16")
     B = T.match_buffer(b, (768, 2304), "float16")
-    C = T.match_buffer(c, (16 * n, 2304), "float16")
-    A_pad = T.alloc_buffer((16 * n // d1 * d1, 768), "float16")
-    C_pad = T.alloc_buffer((16 * n // d1 * d1, 2304), "float16")
-
-    for i, j in T.grid(16 * n // d1 * d1, 768):
-        with T.block("A_pad"):
-            vi, vj = T.axis.remap("SS", [i, j])
-            A_pad[vi, vj] = T.if_then_else(
-                vi < 16 * n and vj < 768, A[vi, vj], T.float16(0), dtype="float16"
-            )
-    for i, j, k in T.grid(16 * n // d1 * d1, 2304, 768):
+    C = T.match_buffer(c, (256 * k, 2304), "float16")
+    for i, j, k in T.grid(256 * k, 2304, 768):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
-                C_pad[vi, vj] = T.float16(0.0)
-            C_pad[vi, vj] = C_pad[vi, vj] + A_pad[vi, vk] * B[vk, vj]
-    for i, j in T.grid(16 * n, 2304):
-        with T.block("C_pad"):
-            vi, vj = T.axis.remap("SS", [i, j])
-            C[vi, vj] = C_pad[vi, vj]
+                C[vi, vj] = T.float16(0.0)
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
 # specify the shape of microkernel in scheduling
@@ -209,14 +190,14 @@ def schedule_matmul(sch, d1_val, d2_val, d3_val):
     C = sch.get_block("C")
     i, j, k = sch.get_loops(C)
     i0, i1 = sch.split(i, [None, d1_val])
-    j0, j1 = sch.split(j, [None, d3_val])
-    k0, k1 = sch.split(k, [None, d2_val])
+    j0, j1 = sch.split(j, [None, d2_val])
+    k0, k1 = sch.split(k, [None, d3_val])
     sch.reorder(i0, j0, k0, i1, j1, k1)
 
 
-def test(mod, d1_val, d2_val, d3_val, build=False):
-    _, _, _, _, d1, d2, d3 = mod.params
-    mod = mod.specialize({d1: d1_val, d2: d2_val, d3: d3_val})
+def test(mod, d1_val, d2_val, d3_val, k=1, build=False):
+    # _, _, _, _, d1, d2, d3 = mod.params
+    # mod = mod.specialize({d1: d1_val, d2: d2_val, d3: d3_val})
     sch = tir.Schedule(mod, debug_mask="all")
     schedule_matmul(sch, d1_val, d2_val, d3_val)
     sch.mod.show()
@@ -227,16 +208,16 @@ def test(mod, d1_val, d2_val, d3_val, build=False):
         # testing
         # dev = tvm.cuda(0)
         dev = tvm.cpu()
-        A_np = np.random.uniform(size=(128, 768)).astype("float16")
+        A_np = np.random.uniform(size=(256 * k, 768)).astype("float16")
         B_np = np.random.uniform(size=(768, 2304)).astype("float16")
         A_nd = tvm.nd.array(A_np, dev)
         B_nd = tvm.nd.array(B_np, dev)
-        C_nd = tvm.nd.array(np.zeros((128, 2304), dtype="float16"), dev)
+        C_nd = tvm.nd.array(np.zeros((256 * k, 2304), dtype="float16"), dev)
         # calculate numpy multiplication results
         device = torch.device("cuda:0")
         C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
         # calculate tvm multiplication results
-        # matmul_mod(A_nd, B_nd, C_nd, 8)
+        # matmul_mod(A_nd, B_nd, C_nd, k)
         # check correctness
         # np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
 
@@ -254,4 +235,4 @@ if __name__ == "__main__":
     mod.show()
     print(trace)
     """
-    test(matmul1, 128, 32, 128, True)
+    test(matmul1, 128, 128, 32, 1, True)
