@@ -176,9 +176,10 @@ def microkernel_tuning(mod):
 
 # d1, d2, d3 are dims of the microkernel, where d2 and d3 are not used
 @T.prim_func
-def matmul1(a: T.handle, b: T.handle, c: T.handle, d1: T.int32, d2: T.int32, d3: T.int32) -> None:
+def matmul1(
+    a: T.handle, b: T.handle, c: T.handle, n: T.int32, d1: T.int32, d2: T.int32, d3: T.int32
+) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    n = T.var("int32")
     A = T.match_buffer(a, (16 * n, 768), "float16")
     B = T.match_buffer(b, (768, 2304), "float16")
     C = T.match_buffer(c, (16 * n, 2304), "float16")
@@ -209,35 +210,37 @@ def schedule_matmul(sch, d1, d2, d3):
 
 
 def test(mod, d1_val, d2_val, d3_val, build=False):
-    _, _, _, d1, d2, d3 = mod.params
+    _, _, _, _, d1, d2, d3 = mod.params
     mod = mod.specialize({d1: d1_val, d2: d2_val, d3: d3_val})
     sch = tir.Schedule(mod, debug_mask="all")
     schedule_matmul(sch, d1, d2, d3)
     sch.mod.show()
 
     if build:
-        matmul_mod = tvm.build(sch.mod, target="cuda")
+        matmul_mod = tvm.build(sch.mod, target="llvm")
 
         # testing
-        dev = tvm.cuda(0)
-        # dev = tvm.cpu()
-        A_np = np.random.uniform(size=(1024, 512)).astype("float16")
-        B_np = np.random.uniform(size=(512, 1024)).astype("float16")
+        # dev = tvm.cuda(0)
+        dev = tvm.cpu()
+        A_np = np.random.uniform(size=(128, 768)).astype("float16")
+        B_np = np.random.uniform(size=(768, 2304)).astype("float16")
         A_nd = tvm.nd.array(A_np, dev)
         B_nd = tvm.nd.array(B_np, dev)
-        C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float16"), dev)
+        C_nd = tvm.nd.array(np.zeros((128, 2304), dtype="float16"), dev)
         # calculate numpy multiplication results
         device = torch.device("cuda:0")
         C_np = torch.tensor(A_np).to(device) @ torch.tensor(B_np).to(device)
         # calculate tvm multiplication results
-        # matmul_mod(A_nd, B_nd, C_nd, 1)
+        matmul_mod(A_nd, B_nd, C_nd, 8)
         # check correctness
-        # np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=0.5)
+        np.testing.assert_allclose(C_np.detach().cpu().numpy(), C_nd.numpy(), atol=2.0)
 
+        """
         # measure running time
-        num_flop = 2 * 1024 * 512 * 1024
+        num_flop = 2 * 128 * 768 * 2304
         evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
         print("matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, 1).mean / 1e9))
+        """
 
 
 if __name__ == "__main__":
@@ -246,4 +249,4 @@ if __name__ == "__main__":
     mod.show()
     print(trace)
     """
-    test(matmul1, 128, 32, 128)
+    test(matmul1, 128, 32, 128, True)
