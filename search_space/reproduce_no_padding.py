@@ -168,6 +168,23 @@ def microkernel_tuning(mod):
     return sch.mod, trace
 
 
+# matmuls to reproduce DietCode
+
+
+@T.prim_func
+def matmul1(a: T.handle, b: T.handle, c: T.handle, n: T.int32) -> None:
+    T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
+    A = T.match_buffer(a, (16 * n, 768), "float16")
+    B = T.match_buffer(b, (768, 2304), "float16")
+    C = T.match_buffer(c, (16 * n, 2304), "float16")
+    for i, j, k in T.grid(16 * n, 2304, 768):
+        with T.block("C"):
+            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+            with T.init():
+                C[vi, vj] = T.float16(0.0)
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
 if __name__ == "__main__":
     mod, trace = microkernel_tuning(ALL_MICROKERNELS[7])
     mod.show()
