@@ -203,6 +203,7 @@ def schedule_matmul(sch):
     l29, l30, l31, l32, l33 = sch.split(
         loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
     )
+    """
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
         loop=l22, n=5, max_innermost_factor=4, decision=[1, 4, 2, 1, 1]
     )
@@ -368,6 +369,7 @@ def schedule_matmul(sch):
     b236 = sch.get_block(name="C_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b236, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b236, tensor_intrin="wmma_store_16x16x16_f16_shared")
+    """
 
 
 def schedule_matmul_optimal(sch: tir.Schedule) -> None:

@@ -466,7 +466,7 @@ class Microkernel_128_128_32:
 from tvm import tir
 
 
-def sch_128_128_32_part1(sch: tir.Schedule) -> None:
+def sch_128_128_32(sch: tir.Schedule) -> None:
     b0 = sch.get_block(name="C", func_name="main")
     b1 = sch.get_block(name="root", func_name="main")
     sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
@@ -551,15 +551,15 @@ def sch_128_128_32_part1(sch: tir.Schedule) -> None:
     )
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
 
-
-def sch_128_128_32_part2(sch: tir.Schedule) -> None:
     i, j, k, l21, l22, l23 = sch.get_loops(block=b20)
     v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
         loop=l21, n=5, max_innermost_factor=4, decision=[2, 4, 1, 1, 1]
     )
-    l29, l30, l31, l32, l33 = sch.split(
-        loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
+    l29, l31, l32, l33, l30 = sch.split(
+        loop=l21, factors=[v24, v26, v27, v28, v25], preserve_unit_iters=True
     )
+    # strange issue causes this
+    sch.reorder(l29, l30, l31, l32, l33)
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
         loop=l22, n=5, max_innermost_factor=4, decision=[2, 2, 2, 1, 1]
     )
@@ -570,26 +570,36 @@ def sch_128_128_32_part2(sch: tir.Schedule) -> None:
         loop=l23, n=3, max_innermost_factor=4, decision=[1, 2, 1]
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
-    sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
+
+    # TODO: can change ways of tiling
+    sch.reorder(i, l29, l39, j, l30, l40, l31, l41, k, l47, l48, l32, l42, l49, l33, l43)
     l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
-    sch.bind(loop=l50, thread_axis="blockIdx.y")
+    l50_1 = sch.fuse(i, l50, preserve_unit_iters=True)  # change line 1
+    sch.bind(loop=l50_1, thread_axis="blockIdx.y")
     l51 = sch.fuse(l30, l40, preserve_unit_iters=True)
-    sch.bind(loop=l51, thread_axis="blockIdx.x")
+    l51_1 = sch.fuse(j, l51, preserve_unit_iters=True)  # change line 2
+    sch.bind(loop=l51_1, thread_axis="blockIdx.x")
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
     sch.bind(loop=l52, thread_axis="threadIdx.y")
+    l47 = sch.fuse(k, l47, preserve_unit_iters=True)
+
     sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=1)
     sch.annotate(
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
+    sch.reverse_compute_at(block=b53, loop=l50_1, preserve_unit_loops=True, index=-1)
+
+
+def test(sch):
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=0
     )
+
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
-    sch.reverse_compute_inline(block=b2)
+    # sch.reverse_compute_inline(block=b2)
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
@@ -647,8 +657,8 @@ def sch_128_128_32_part2(sch: tir.Schedule) -> None:
         ann_key="meta_schedule.auto_tensorize",
         ann_val="wmma_load_16x16x16_f16_b",
     )
-    sch.compute_inline(block=b3)
-    sch.compute_inline(block=b4)
+    # sch.compute_inline(block=b3)
+    # sch.compute_inline(block=b4)
     sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
     sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
     v135 = sch.sample_categorical(

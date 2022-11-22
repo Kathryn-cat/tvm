@@ -195,7 +195,7 @@ def schedule_matmul(sch, d1_val, d2_val, d3_val):
     k0, k1 = sch.split(k, [None, d3_val])
     sch.reorder(i0, j0, k0, i1, j1, k1)
 
-    sch_128_128_32_part1(sch)
+    sch_128_128_32(sch)
 
 
 def test(mod, d1_val, d2_val, d3_val, k=1, build=False):
@@ -238,4 +238,4 @@ if __name__ == "__main__":
     mod.show()
     print(trace)
     """
-    test(matmul1, 128, 128, 32, 1, True)
+    test(matmul1, 128, 128, 32, 1, False)
