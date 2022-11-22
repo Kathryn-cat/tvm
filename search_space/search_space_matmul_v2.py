@@ -15,14 +15,14 @@ Test with this branch with no hacks. (previous hacks in dyn-shape)
 
 import numpy as np
 import torch
-from handcrafted_dyn_ir import MatmulModule
-from handcrafted_dyn_ir_n_2 import MatmulModule2
-from handcrafted_dyn_ir_n_3 import MatmulModule3
-from handcrafted_dyn_ir_n_4 import MatmulModule4
-from microkernel import Microkernel_128x128x32
-from optimal_ir import StaticMatmulModule
-from optimal_ir_n_3 import StaticMatmulModule3
-from optimal_ir_n_4 import StaticMatmulModule4
+from sample_ir.handcrafted_dyn_ir import MatmulModule
+from sample_ir.handcrafted_dyn_ir_n_2 import MatmulModule2
+from sample_ir.handcrafted_dyn_ir_n_3 import MatmulModule3
+from sample_ir.handcrafted_dyn_ir_n_4 import MatmulModule4
+from sample_ir.microkernel import Microkernel_128x128x32
+from sample_ir.optimal_ir import StaticMatmulModule
+from sample_ir.optimal_ir_n_3 import StaticMatmulModule3
+from sample_ir.optimal_ir_n_4 import StaticMatmulModule4
 
 import tvm
 from tvm import meta_schedule as ms
@@ -694,13 +694,12 @@ def test_perf_diff(n=1):
     evaluator = static_matmul_mod.time_evaluator("static_matmul_module_4", dev, number=10)
     print("static matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
 
-    """
     sch = tir.Schedule(matmul, debug_mask="all")
     schedule_matmul(sch)
     sch.mod.show()
-    matmul_mod = tvm.build(sch.mod, target="cuda")
     """
-    matmul_mod = tvm.build(MatmulModule4, target="cuda")
+    matmul_mod = tvm.build(sch.mod, target="cuda")
+    # matmul_mod = tvm.build(MatmulModule4, target="cuda")
     dev = tvm.cuda(0)
     A_np = np.random.uniform(size=(1024, n * 512)).astype("float16")
     B_np = np.random.uniform(size=(n * 512, 1024)).astype("float16")
@@ -712,6 +711,7 @@ def test_perf_diff(n=1):
     # evaluator = matmul_mod.time_evaluator("matmul", dev, number=10)
     evaluator = matmul_mod.time_evaluator("matmul_module_4", dev, number=10)
     print("matmul: %f GFLOPS\n" % (num_flop / evaluator(A_nd, B_nd, C_nd, n).mean / 1e9))
+    """
 
 
 if __name__ == "__main__":
