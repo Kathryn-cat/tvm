@@ -532,13 +532,25 @@ def sch_128_128_32(sch: tir.Schedule) -> None:
     )
     """
     b0 = sch.get_block(name="C", func_name="main")
-    _, _, _, l5, l6, l7 = sch.get_loops(block=b0)
-    l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
-    l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
-    l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
-    _, _, _, l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
-    sch.reorder(l16, l18, l13, l11, l9)
-    b20 = sch.blockize(loop=l13)
+    i, j, k, l5, l6, l7 = sch.get_loops(block=b0)
+    v24, v25, v26, v27, v28, v = sch.sample_perfect_tile(
+        loop=l5, n=6, max_innermost_factor=4, decision=[2, 4, 1, 1, 1, 16]
+    )
+    l29, l30, l31, l32, l33, l01 = sch.split(
+        loop=l5, factors=[v24, v25, v26, v27, v28, v], preserve_unit_iters=True
+    )
+    v34, v35, v36, v37, v38, v = sch.sample_perfect_tile(
+        loop=l6, n=6, max_innermost_factor=4, decision=[2, 2, 2, 1, 1, 16]
+    )
+    l39, l40, l41, l42, l43, l02 = sch.split(
+        loop=l6, factors=[v34, v35, v36, v37, v38, v], preserve_unit_iters=True
+    )
+    v44, v45, v46, v = sch.sample_perfect_tile(
+        loop=l7, n=4, max_innermost_factor=4, decision=[1, 2, 1, 16]
+    )
+    l47, l48, l49, l03 = sch.split(loop=l7, factors=[v44, v45, v46, v], preserve_unit_iters=True)
+    sch.reorder(l29, l30, l31, l32, l33, l39, l40, l41, l42, l43, l47, l48, l49, l01, l02, l03)
+    b20 = sch.blockize(loop=l01)
     sch.annotate(
         block_or_loop=b20,
         ann_key="meta_schedule.auto_tensorize",
@@ -551,25 +563,11 @@ def sch_128_128_32(sch: tir.Schedule) -> None:
     )
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
 
-    i, j, k, l21, l22, l23 = sch.get_loops(block=b20)
-    v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
-        loop=l21, n=5, max_innermost_factor=4, decision=[2, 4, 1, 1, 1]
-    )
-    l29, l31, l32, l33, l30 = sch.split(
-        loop=l21, factors=[v24, v26, v27, v28, v25], preserve_unit_iters=True
-    )
-    # strange issue causes this
-    sch.reorder(l29, l30, l31, l32, l33)
-    v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
-        loop=l22, n=5, max_innermost_factor=4, decision=[2, 2, 2, 1, 1]
-    )
-    l39, l40, l41, l42, l43 = sch.split(
-        loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
-    )
-    v44, v45, v46 = sch.sample_perfect_tile(
-        loop=l23, n=3, max_innermost_factor=4, decision=[1, 2, 1]
-    )
-    l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
+    # l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
+    # l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
+    # l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
+    # _, _, _, l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
+    # sch.reorder(l16, l18, l13, l11, l9)
 
     # TODO: can change ways of tiling
     sch.reorder(i, l29, l39, j, l30, l40, l31, l41, k, l47, l48, l32, l42, l49, l33, l43)
@@ -587,17 +585,17 @@ def sch_128_128_32(sch: tir.Schedule) -> None:
     sch.annotate(
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
-    b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l50_1, preserve_unit_loops=True, index=-1)
 
 
 def test(sch):
+
+    b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
+    sch.reverse_compute_at(block=b53, loop=l50_1, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=0
     )
-
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     # sch.reverse_compute_inline(block=b2)
     l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
