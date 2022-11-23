@@ -54,4 +54,27 @@ i0, i1 = sch.split(i, [None, 128])
 j0, j1 = sch.split(j, [None, 128])
 sch.reorder(i0, j0, i1, j1, k)
 sch.blockize(i1)
+
+k0, k1 = sch.split(k, [None, 32])
+sch.reorder(k0, i1, j1, k1)
+CTA = sch.blockize(i1)
+
+i2, i3 = sch.split(i1, [None, 16])
+j2, j3 = sch.split(j1, [None, 16])
+k2, k3 = sch.split(k1, [None, 16])
+sch.reorder(i2, j2, k2, i3, j3, k3)
+C = sch.blockize(i3)
+A_shared = sch.cache_read(C, 1, "shared")
+B_shared = sch.cache_read(C, 2, "shared")
+A_wmma = sch.cache_read(C, 1, "wmma.matrix_a")
+B_wmma = sch.cache_read(C, 2, "wmma.matrix_b")
+C_wmma = sch.cache_write(C, 0, "wmma.accumulator")
+
+l0, l1 = sch.get_loops(C_wmma)
+l2, l3 = sch.split(l0, [None, 16])
+l4, l5 = sch.split(l1, [None, 16])
+sch.reorder(l2, l4, l3, l5)
+sch.blockize(l3)
+
+
 sch.mod.show()
