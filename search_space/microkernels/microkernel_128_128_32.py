@@ -586,13 +586,20 @@ def sch_128_128_32(sch: tir.Schedule) -> None:
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
 
+    sch.blockize(l52)
+    b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
+    # sch.reverse_compute_at(block=b53, loop=l52, preserve_unit_loops=True, index=-1)
+    sch.blockize(l47)
+    b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
+    # sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
+    b73 = sch.cache_read(
+        block=b20, read_buffer_index=1, storage_scope="shared", consumer_blocks=[b20]
+    )
+    sch.compute_at(block=b73, loop=l47, preserve_unit_loops=True, index=-1)
+
 
 def test(sch):
 
-    b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l50_1, preserve_unit_loops=True, index=-1)
-    b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
-    sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=0
     )
@@ -609,10 +616,7 @@ def test(sch):
         ann_key="meta_schedule.auto_tensorize",
         ann_val="wmma_store_16x16x16_f16_shared",
     )
-    b73 = sch.cache_read(
-        block=b20, read_buffer_index=0, storage_scope="shared", consumer_blocks=[b20]
-    )
-    sch.compute_at(block=b73, loop=l47, preserve_unit_loops=True, index=-1)
+
     l74, l75, l76, l77, l78, l79 = sch.get_loops(block=b73)
     l80 = sch.fuse(l78, l79, preserve_unit_iters=True)
     v81 = sch.sample_categorical(
