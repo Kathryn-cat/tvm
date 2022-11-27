@@ -47,6 +47,8 @@ def apply_trace(sch: tir.Schedule) -> None:
     j0, j1 = sch.split(j, [None, 128])
     sch.reorder(i0, j0, i1, j1, k)
     sch.blockize(i1)
+    sch.bind(loop=i0, thread_axis="blockIdx.y")
+    sch.bind(loop=j0, thread_axis="blockIdx.x")
     k0, k1 = sch.split(k, [None, 32])
     sch.reorder(k0, i1, j1, k1)
     CTA = sch.blockize(i1)
@@ -121,7 +123,6 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.reorder(l16, l18, l13, l11, l9)
     l14_1, l15_1, l16_1, l17_1, l18_1, l19_1 = sch.get_loops(block=b0)  # refer to these loops
     b20 = sch.blockize(loop=l17_1)
-    """
     sch.annotate(
         block_or_loop=b20,
         ann_key="meta_schedule.auto_tensorize",
@@ -134,33 +135,46 @@ def apply_trace(sch: tir.Schedule) -> None:
     )
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
     l21, l22, l23 = sch.get_loops(block=b20)
-    v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
-        loop=l21, n=5, max_innermost_factor=4, decision=[2, 16, 2, 2, 1]  # TODO: 128
+    # v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
+    #    loop=l21, n=5, max_innermost_factor=4, decision=[2, 16, 2, 2, 1]  # TODO: 128
+    # )
+    v26, v27, v28 = sch.sample_perfect_tile(
+        loop=l21, n=3, max_innermost_factor=4, decision=[2, 2, 1]
     )
-    l29, l30, l31, l32, l33 = sch.split(
-        loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
+    # l29, l30, l31, l32, l33 = sch.split(
+    #    loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
+    # )
+    l31, l32, l33 = sch.split(loop=l21, factors=[v26, v27, v28], preserve_unit_iters=True)
+    # v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
+    #    loop=l22, n=5, max_innermost_factor=4, decision=[16, 1, 2, 4, 1]  # TODO: 128
+    # )
+    v36, v37, v38 = sch.sample_perfect_tile(
+        loop=l22, n=3, max_innermost_factor=4, decision=[2, 4, 1]
     )
-    v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
-        loop=l22, n=5, max_innermost_factor=4, decision=[16, 1, 2, 4, 1]  # TODO: 128
-    )
-    l39, l40, l41, l42, l43 = sch.split(
-        loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
-    )
+    # l39, l40, l41, l42, l43 = sch.split(
+    #    loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
+    # )
+    l41, l42, l43 = sch.split(loop=l22, factors=[v36, v37, v38], preserve_unit_iters=True)
+    # v44, v45, v46 = sch.sample_perfect_tile(
+    #    loop=l23, n=3, max_innermost_factor=4, decision=[16, 1, 2]  # TODO: 32
+    # )
     v44, v45, v46 = sch.sample_perfect_tile(
-        loop=l23, n=3, max_innermost_factor=4, decision=[16, 1, 2]  # TODO: 32
+        loop=l23, n=3, max_innermost_factor=4, decision=[1, 1, 2]  # TODO: 32
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
-    sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
-    l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
-    sch.bind(loop=l50, thread_axis="blockIdx.y")
-    l51 = sch.fuse(l30, l40, preserve_unit_iters=True)
-    sch.bind(loop=l51, thread_axis="blockIdx.x")
+    # sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
+    sch.reorder(l31, l41, l47, l48, l32, l42, l49, l33, l43)
+    # l50 = sch.fuse(l29, l39, preserve_unit_iters=True)
+    # sch.bind(loop=l50, thread_axis="blockIdx.y")
+    # l51 = sch.fuse(l30, l40, preserve_unit_iters=True)
+    # sch.bind(loop=l51, thread_axis="blockIdx.x")
     l52 = sch.fuse(l31, l41, preserve_unit_iters=True)
     sch.bind(loop=l52, thread_axis="threadIdx.y")
     sch.annotate(block_or_loop=b20, ann_key="meta_schedule.thread_extent_low_inclusive", ann_val=32)
     sch.annotate(
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
+    """
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
     sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
