@@ -176,18 +176,20 @@ def apply_trace(sch: tir.Schedule) -> None:
     )
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
     # sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
+    """
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
-    """
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     # sch.reverse_compute_inline(block=b2)
-    l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
+    # l56, l57, l58, l59, l60 = sch.get_loops(block=b54)
+    l58, l59, l60 = sch.get_loops(block=b54)
     l61, l62 = sch.split(loop=l60, factors=[None, 16], preserve_unit_iters=True)
     l63, l64 = sch.split(loop=l59, factors=[None, 16], preserve_unit_iters=True)
-    l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
+    # l65, l66, l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
+    l67, l68, l69, l70, l71 = sch.get_loops(block=b54)
     sch.reorder(l70, l64, l62)
     b72 = sch.blockize(loop=l64)
     sch.annotate(
