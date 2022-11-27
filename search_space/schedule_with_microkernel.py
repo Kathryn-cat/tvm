@@ -25,78 +25,103 @@ def microkernelOrig(a: T.handle, b: T.handle, c: T.handle) -> None:
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
 
+@T.prim_func
+def matmul1(a: T.handle, b: T.handle, c: T.handle, k: T.int32) -> None:
+    T.func_attr({"global_symbol": "matmul1", "tir.noalias": True})
+    A = T.match_buffer(a, (256 * k, 768), "float16")
+    B = T.match_buffer(b, (768, 2304), "float16")
+    C = T.match_buffer(c, (256 * k, 2304), "float16")
+    for i, j, k in T.grid(256 * k, 2304, 768):
+        with T.block("C"):
+            vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+            with T.init():
+                C[vi, vj] = T.float16(0.0)
+            C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+# microkernel is 64, 128, 32
 def apply_trace(sch: tir.Schedule) -> None:
+    C = sch.get_block("C")
+    i, j, k = sch.get_loops(C)
+    i0, i1 = sch.split(i, [None, 64])
+    j0, j1 = sch.split(j, [None, 128])
+    sch.reorder(i0, j0, i1, j1, k)
+    sch.blockize(i1)
+    k0, k1 = sch.split(k, [None, 32])
+    sch.reorder(k0, i1, j1, k1)
+    CTA = sch.blockize(i1)
+
     b0 = sch.get_block(name="C", func_name="main")
     b1 = sch.get_block(name="root", func_name="main")
     sch.annotate(block_or_loop=b0, ann_key="meta_schedule.tiling_structure", ann_val="SSSRRSRS")
-    """
-    b2 = sch.reindex(block=b0, buffer=("write", 0))
-    b3 = sch.reindex(block=b0, buffer=("read", 0))
-    b4 = sch.reindex(block=b0, buffer=("read", 1))
-    sch.transform_layout(
-        block=b0,
-        buffer=("read", 0),
-        index_map=lambda vi, vk: (
-            vi,
-            vk,
-        ),
-        pad_value=None,
-    )
-    sch.transform_layout(
-        block=b0,
-        buffer=("read", 1),
-        index_map=lambda vj, vk: (
-            vj,
-            vk,
-        ),
-        pad_value=None,
-    )
-    sch.transform_layout(
-        block=b0,
-        buffer=("write", 0),
-        index_map=lambda vi, vj: (
-            vi,
-            vj,
-        ),
-        pad_value=None,
-    )
-    sch.transform_block_layout(
-        block=b2,
-        index_map=lambda vi, vj: (
-            vi,
-            vj,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b3,
-        index_map=lambda vi, vk: (
-            vi,
-            vk,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b4,
-        index_map=lambda vj, vk: (
-            vj,
-            vk,
-        ),
-    )
-    sch.transform_block_layout(
-        block=b0,
-        index_map=lambda vi, vj, vk: (
-            vi,
-            vj,
-            vk,
-        ),
-    )
-    """
+    # b2 = sch.reindex(block=b0, buffer=("write", 0))
+    # b3 = sch.reindex(block=b0, buffer=("read", 0))
+    # b4 = sch.reindex(block=b0, buffer=("read", 1))
+    # sch.transform_layout(
+    #    block=b0,
+    #    buffer=("read", 0),
+    #    index_map=lambda vi, vk: (
+    #        vi,
+    #        vk,
+    #    ),
+    #    pad_value=None,
+    # )
+    # sch.transform_layout(
+    #    block=b0,
+    #    buffer=("read", 1),
+    #    index_map=lambda vj, vk: (
+    #        vj,
+    #        vk,
+    #    ),
+    #    pad_value=None,
+    # )
+    # sch.transform_layout(
+    #    block=b0,
+    #    buffer=("write", 0),
+    #    index_map=lambda vi, vj: (
+    #        vi,
+    #        vj,
+    #    ),
+    #    pad_value=None,
+    # )
+    # sch.transform_block_layout(
+    #    block=b2,
+    #    index_map=lambda vi, vj: (
+    #        vi,
+    #        vj,
+    #    ),
+    # )
+    # sch.transform_block_layout(
+    #    block=b3,
+    #    index_map=lambda vi, vk: (
+    #        vi,
+    #        vk,
+    #    ),
+    # )
+    # sch.transform_block_layout(
+    #    block=b4,
+    #    index_map=lambda vj, vk: (
+    #        vj,
+    #        vk,
+    #    ),
+    # )
+    # sch.transform_block_layout(
+    #    block=b0,
+    #    index_map=lambda vi, vj, vk: (
+    #        vi,
+    #        vj,
+    #        vk,
+    #    ),
+    # )
     l5, l6, l7 = sch.get_loops(block=b0)
     l8, l9 = sch.split(loop=l7, factors=[None, 16], preserve_unit_iters=True)
     l10, l11 = sch.split(loop=l6, factors=[None, 16], preserve_unit_iters=True)
     l12, l13 = sch.split(loop=l5, factors=[None, 16], preserve_unit_iters=True)
     l14, l15, l16, l17, l18, l19 = sch.get_loops(block=b0)
     sch.reorder(l16, l18, l13, l11, l9)
-    b20 = sch.blockize(loop=l13)
+    l14_1, l15_1, l16_1, l17_1, l18_1, l19_1 = sch.get_loops(block=b0)  # refer to these loops
+    b20 = sch.blockize(loop=l17_1)
+    """
     sch.annotate(
         block_or_loop=b20,
         ann_key="meta_schedule.auto_tensorize",
@@ -295,6 +320,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     b238 = sch.get_block(name="C_shared_wmma.accumulator_o", func_name="main")
     sch.unannotate(block_or_loop=b238, ann_key="meta_schedule.auto_tensorize")
     sch.tensorize(block_or_loop=b238, tensor_intrin="wmma_store_16x16x16_f16_shared")
+    """
 
 
 if __name__ == "__main__":
