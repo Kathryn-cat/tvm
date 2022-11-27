@@ -110,19 +110,19 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.annotate(block_or_loop=b20, ann_key="warp_execution", ann_val=1)
     l21, l22, l23 = sch.get_loops(block=b20)
     v24, v25, v26, v27, v28 = sch.sample_perfect_tile(
-        loop=l21, n=5, max_innermost_factor=4, decision=[2, 64, 1, 1, 1]
+        loop=l21, n=5, max_innermost_factor=4, decision=[2, 16, 2, 2, 1]  # TODO: 128
     )
     l29, l30, l31, l32, l33 = sch.split(
         loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
     )
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
-        loop=l22, n=5, max_innermost_factor=4, decision=[8, 1, 1, 16, 1]
+        loop=l22, n=5, max_innermost_factor=4, decision=[16, 1, 2, 4, 1]  # TODO: 128
     )
     l39, l40, l41, l42, l43 = sch.split(
         loop=l22, factors=[v34, v35, v36, v37, v38], preserve_unit_iters=True
     )
     v44, v45, v46 = sch.sample_perfect_tile(
-        loop=l23, n=3, max_innermost_factor=4, decision=[8, 2, 2]
+        loop=l23, n=3, max_innermost_factor=4, decision=[16, 1, 2]  # TODO: 32
     )
     l47, l48, l49 = sch.split(loop=l23, factors=[v44, v45, v46], preserve_unit_iters=True)
     sch.reorder(l29, l39, l30, l40, l31, l41, l47, l48, l32, l42, l49, l33, l43)
@@ -141,7 +141,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
     v55 = sch.sample_categorical(
-        candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=3
+        candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch", ann_val=v55)
     # sch.reverse_compute_inline(block=b2)
@@ -173,7 +173,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     l83, l84, l85, l86, l87, l88 = sch.get_loops(block=b82)
     l89 = sch.fuse(l87, l88, preserve_unit_iters=True)
     v90 = sch.sample_categorical(
-        candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=1
+        candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
     sch.annotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch", ann_val=v90)
     b91 = sch.cache_read(block=b20, read_buffer_index=0, storage_scope="wmma.matrix_a")
@@ -222,7 +222,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.unannotate(block_or_loop=b53, ann_key="meta_schedule.cooperative_fetch")
     l136, l137, l138, l139 = sch.get_loops(block=b53)
     l140, l141, l142, l143 = sch.split(
-        loop=l139, factors=[None, 1, 32, 8], preserve_unit_iters=True
+        loop=l139, factors=[None, 4, 32, 1], preserve_unit_iters=True
     )
     sch.vectorize(loop=l143)
     sch.bind(loop=l142, thread_axis="threadIdx.x")
@@ -230,7 +230,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.unannotate(block_or_loop=b73, ann_key="meta_schedule.cooperative_fetch")
     l144, l145, l146, l147, l148 = sch.get_loops(block=b73)
     l149, l150, l151, l152 = sch.split(
-        loop=l148, factors=[None, 1, 32, 2], preserve_unit_iters=True
+        loop=l148, factors=[None, 4, 32, 2], preserve_unit_iters=True
     )
     sch.vectorize(loop=l152)
     sch.bind(loop=l151, thread_axis="threadIdx.x")
@@ -238,7 +238,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.unannotate(block_or_loop=b82, ann_key="meta_schedule.cooperative_fetch")
     l153, l154, l155, l156, l157 = sch.get_loops(block=b82)
     l158, l159, l160, l161 = sch.split(
-        loop=l157, factors=[None, 1, 32, 2], preserve_unit_iters=True
+        loop=l157, factors=[None, 4, 32, 4], preserve_unit_iters=True
     )
     sch.vectorize(loop=l161)
     sch.bind(loop=l160, thread_axis="threadIdx.x")
@@ -289,6 +289,7 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.tensorize(block_or_loop=b236, tensor_intrin="wmma_load_16x16x16_f16_b_trans")
     b237 = sch.get_block(name="C_o_update", func_name="main")
     sch.unannotate(block_or_loop=b237, ann_key="meta_schedule.auto_tensorize")
+    # sch.tensorize(block_or_loop=b237, tensor_intrin="wmma_sync_16x16x16_f16f16f16_trans")
     sch.tensorize(block_or_loop=b237, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
     # b238 = sch.get_block(name="C_reindex_shared_wmma.accumulator_o", func_name="main")
     b238 = sch.get_block(name="C_shared_wmma.accumulator_o", func_name="main")
