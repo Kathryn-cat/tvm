@@ -174,11 +174,11 @@ def apply_trace(sch: tir.Schedule) -> None:
     sch.annotate(
         block_or_loop=b20, ann_key="meta_schedule.thread_extent_high_inclusive", ann_val=1024
     )
-    """
     b53 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="shared")
-    sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
+    # sch.reverse_compute_at(block=b53, loop=l51, preserve_unit_loops=True, index=-1)
     b54 = sch.cache_write(block=b20, write_buffer_index=0, storage_scope="wmma.accumulator")
     sch.reverse_compute_at(block=b54, loop=l52, preserve_unit_loops=True, index=-1)
+    """
     v55 = sch.sample_categorical(
         candidates=[1, 2, 4, 8], probs=[0.25, 0.25, 0.25, 0.25], decision=2
     )
@@ -338,6 +338,6 @@ def apply_trace(sch: tir.Schedule) -> None:
 
 
 if __name__ == "__main__":
-    sch = tir.Schedule(microkernelOrig)
+    sch = tir.Schedule(matmul1)
     apply_trace(sch)
     sch.mod.show()
