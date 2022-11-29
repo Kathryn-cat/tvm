@@ -351,7 +351,8 @@ class StagedModule:
                                         )
                             for ax0_0, ax1_0 in T.grid(8, 8):
                                 with T.block("C_pad_shared_wmma.accumulator_o"):
-                                    v0_o, v1_o = T.axis.remap("SS", [ax0_0, ax1_0])
+                                    v0_o = T.axis.spatial((m + 127) // 128 * 8, ax0_0 + vi_o * 8)
+                                    v1_o = T.axis.spatial((p + 127) // 128 * 8, ax1_0 + vj_o * 8)
                                     T.reads(
                                         C_pad_shared_wmma_accumulator[
                                             v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
@@ -364,8 +365,7 @@ class StagedModule:
                                     )
                                     for ax0_1, ax1_1 in T.grid(16, 16):
                                         with T.block("C_pad_shared_wmma.accumulator"):
-                                            v0_i = T.axis.spatial(16, ax0_1 + vi_o * 128)
-                                            v1_i = T.axis.spatial(16, ax1_1 + vj_o * 128)
+                                            v0_i, v1_i = T.axis.remap("SS", [ax0_1, ax1_1])
                                             T.reads(
                                                 C_pad_shared_wmma_accumulator[
                                                     v0_o * 16 + v0_i, v1_o * 16 + v1_i

@@ -3,6 +3,7 @@ import torch
 from bad_ir import BadModule
 from microkernels import *
 from modified_ir import DynMatmulModule
+from stage_ir_apply_trace2 import StagedModule
 
 import tvm
 from tvm import meta_schedule as ms
@@ -709,7 +710,7 @@ def apply_trace2(sch):
     C_shared = sch.cache_write(C, 0, "shared")
     C_wmma = sch.cache_write(C, 0, "wmma.accumulator")
 
-    # sch.tensorize(block_or_loop=C, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
+    sch.tensorize(block_or_loop=C, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
 
     a1, a2 = sch.get_loops(A_shared)
     l = sch.fuse(a1, a2, preserve_unit_iters=True)
@@ -758,63 +759,33 @@ def apply_trace2(sch):
     # b = sch.get_block("B_pad_shared_wmma.matrix_a_o")
     # sch.tensorize(block_or_loop=B_wmma, tensor_intrin="wmma_load_16x16x16_f16_b_trans")
 
-    # sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
-    # sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
+    sch.storage_align(block=A_shared, buffer_index=0, axis=-2, factor=32, offset=8)
+    sch.storage_align(block=B_shared, buffer_index=0, axis=-2, factor=32, offset=8)
 
 
 def apply_trace3(sch):
-    C = sch.get_block("C")
-    i, j, k = sch.get_loops(C)
-    i0, i1 = sch.split(i, [None, 128])
-    j0, j1 = sch.split(j, [None, 128])
-    sch.reorder(i0, j0, i1, j1, k)
-    # sch.blockize(i1)
-    k0, k1 = sch.split(k, [None, 32])
-    sch.reorder(k0, i1, j1, k1)
-    CTA = sch.blockize(i1)
-
-    i2, i3 = sch.split(i1, [None, 16])
-    j2, j3 = sch.split(j1, [None, 16])
-    k2, k3 = sch.split(k1, [None, 16])
-    sch.reorder(i2, j2, k2, i3, j3, k3)
-    C = sch.blockize(i3)
-
-    A_shared = sch.cache_read(C, 1, "shared")
-    # B_shared = sch.cache_read(C, 0, "shared")
-    A_wmma = sch.cache_read(C, 1, "wmma.matrix_a")
-    # B_wmma = sch.cache_read(C, 0, "wmma.matrix_b")
-
-    l97, l98 = sch.get_loops(A_wmma)
-    l99, l100 = sch.split(loop=l98, factors=[None, 16], preserve_unit_iters=True)
-    l101, l102 = sch.split(loop=l97, factors=[None, 16], preserve_unit_iters=True)
-    l108, l109, l110, l111 = sch.get_loops(A_wmma)
-    sch.reorder(l110, l109)
-    l1, l2, l3, l4 = sch.get_loops(A_wmma)
-    b112 = sch.blockize(loop=l109)
-
-    # sch.storage_align(block=b73, buffer_index=0, axis=-2, factor=32, offset=8)
-    # sch.storage_align(block=b82, buffer_index=0, axis=-2, factor=32, offset=8)
-
-    # sch.tensorize(block_or_loop=b112, tensor_intrin="wmma_load_16x16x16_f16_a")
-
-
-def apply_trace4(sch):
     A_wmma = sch.get_block("A_pad_shared_wmma.matrix_a_o")
     sch.tensorize(block_or_loop=A_wmma, tensor_intrin="wmma_load_16x16x16_f16_a")
+    B_wmma = sch.get_block("B_pad_shared_wmma.matrix_b_o")
+    sch.tensorize(block_or_loop=B_wmma, tensor_intrin="wmma_load_16x16x16_f16_b_trans")
+    C_wmma = sch.get_block("C_pad_shared_wmma.accumulator_o")
+    sch.tensorize(block_or_loop=C_wmma, tensor_intrin="wmma_store_16x16x16_f16_shared")
 
 
 if __name__ == "__main__":
     # sch = tir.Schedule(microkernelOrig)
     # apply_trace_orig(sch)
+    """
     sch = tir.Schedule(matmul)
     apply_trace2(sch)
     sch.mod.show()
     """
+    """
     print("tensor intrinsic:")
     res = get_wmma_store_intrin(16, 16, 16, "float16", "load")
     res[0].show()
-    sch = tir.Schedule(DynMatmulModule)
-    apply_trace4(sch)
-    sch.mod.show()
     """
+    sch = tir.Schedule(StagedModule)
+    apply_trace3(sch)
+    sch.mod.show()
     # matmul_mod = tvm.build(sch.mod, target="cuda")
