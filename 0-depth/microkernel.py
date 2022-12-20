@@ -44,3 +44,15 @@ def microkernel_128_128_32(a: T.handle, b: T.handle, c: T.handle) -> None:
             with T.init():
                 C[vi, vj] = T.float16(0.0)
             C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+def tuning(mod):
+    target = tvm.target.Target("nvidia/geforce-rtx-3090")
+    with ms.Profiler() as profiler:
+        sch: tvm.tir.Schedule = ms.tune_tir(
+            mod=mod,
+            target=target,
+            num_trials_per_iter=32,
+            max_trials_global=2000,
+            work_dir="logs",
+        )
