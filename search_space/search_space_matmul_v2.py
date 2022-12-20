@@ -203,7 +203,6 @@ def schedule_matmul(sch):
     l29, l30, l31, l32, l33 = sch.split(
         loop=l21, factors=[v24, v25, v26, v27, v28], preserve_unit_iters=True
     )
-    """
     v34, v35, v36, v37, v38 = sch.sample_perfect_tile(
         loop=l22, n=5, max_innermost_factor=4, decision=[1, 4, 2, 1, 1]
     )
@@ -359,6 +358,7 @@ def schedule_matmul(sch):
     sch.tensorize(block_or_loop=b232, tensor_intrin="wmma_fill_16x16x16_f16")
     b233 = sch.get_block(name="A_shared_wmma.matrix_a_o", func_name="main")
     sch.unannotate(block_or_loop=b233, ann_key="meta_schedule.auto_tensorize")
+    """
     sch.tensorize(block_or_loop=b233, tensor_intrin="wmma_load_16x16x16_f16_a")
     b234 = sch.get_block(name="B_shared_wmma.matrix_b_o", func_name="main")
     sch.unannotate(block_or_loop=b234, ann_key="meta_schedule.auto_tensorize")
@@ -723,4 +723,5 @@ if __name__ == "__main__":
     """
     # test(build=True)
     # test_static(build=True)
-    test_perf_diff(n=4)
+    # test_perf_diff(n=4)
+    test(False)

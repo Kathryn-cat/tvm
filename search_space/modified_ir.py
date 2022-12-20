@@ -115,7 +115,8 @@ class DynMatmulModule:
                                     A_pad_shared[v0, v1] = A_pad[v0, v1]
                             for ax0_0, ax1_0 in T.grid(8, 2):
                                 with T.block("A_pad_shared_wmma.matrix_a_o"):
-                                    v0_o, v1_o = T.axis.remap("SS", [ax0_0, ax1_0])
+                                    v0_o = T.axis.spatial((m + 127) // 128 * 8, vi_o * 8 + ax0_0)
+                                    v1_o = T.axis.spatial((n + 31) // 32 * 2, vk_i_o * 2 + ax1_0)
                                     T.reads(
                                         A_pad_shared[
                                             v0_o * 16 : v0_o * 16 + 16, v1_o * 16 : v1_o * 16 + 16
@@ -128,8 +129,7 @@ class DynMatmulModule:
                                     )
                                     for ax0_1, ax1_1 in T.grid(16, 16):
                                         with T.block("A_pad_shared_wmma.matrix_a"):
-                                            v0_i = T.axis.spatial(16, ax0_1 + vi_o * 128)
-                                            v1_i = T.axis.spatial(16, ax1_1 + vk_i_o * 32)
+                                            v0_i, v1_i = T.axis.remap("SS", [ax0_1, ax1_1])
                                             T.reads(
                                                 A_pad_shared[v0_o * 16 + v0_i, v1_o * 16 + v1_i]
                                             )

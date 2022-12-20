@@ -7,6 +7,8 @@ import tvm
 from tvm import meta_schedule as ms
 from tvm import tir
 from tvm.script import tir as T
+from tvm.tir.tensor_intrin import cuda as _
+from tvm.tir.tensor_intrin.cuda import get_wmma_store_intrin
 
 
 # we handle all the shapes of multiple of 16
@@ -68,13 +70,8 @@ A_shared = sch.cache_read(C, 1, "shared")
 B_shared = sch.cache_read(C, 2, "shared")
 A_wmma = sch.cache_read(C, 1, "wmma.matrix_a")
 B_wmma = sch.cache_read(C, 2, "wmma.matrix_b")
+C_shared = sch.cache_write(C, 0, "shared")
 C_wmma = sch.cache_write(C, 0, "wmma.accumulator")
-
-l0, l1 = sch.get_loops(C_wmma)
-l2, l3 = sch.split(l0, [None, 16])
-l4, l5 = sch.split(l1, [None, 16])
-sch.reorder(l2, l4, l3, l5)
-sch.blockize(l3)
-
+sch.tensorize(block_or_loop=C, tensor_intrin="wmma_sync_16x16x16_f16f16f16")
 
 sch.mod.show()

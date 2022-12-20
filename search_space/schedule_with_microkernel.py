@@ -788,4 +788,4 @@ if __name__ == "__main__":
     sch = tir.Schedule(StagedModule)
     apply_trace3(sch)
     sch.mod.show()
-    # matmul_mod = tvm.build(sch.mod, target="cuda")
+    matmul_mod = tvm.build(sch.mod, target="cuda")

@@ -145,16 +145,17 @@ ALL_MICROKERNELS = [
 ]
 
 
-def microkernel_tuning(mod):
+def tuning(mod):
     target = tvm.target.Target("nvidia/geforce-rtx-3090")
     with ms.Profiler() as profiler:
         sch: tvm.tir.Schedule = ms.tune_tir(
             mod=mod,
             target=target,
             num_trials_per_iter=32,
-            max_trials_global=1000,
+            max_trials_global=32,
             work_dir="logs",
         )
+        """
         # find the best trace
         min_run_time = 1.0
         best_idx = -1
@@ -166,6 +167,19 @@ def microkernel_tuning(mod):
         trace = sch.get_all_tuning_records()[best_idx].trace
         sch = tir.Schedule(mod, debug_mask="all")
         trace.apply_to_schedule(sch, False)
+        """
+        # record all traces to file
+        with open("record.txt", "a") as f:
+            for record in sch.get_all_tuning_records():
+                trace = record.trace
+                sch = tir.Schedule(mod)
+                trace.apply_to_schedule(sch, False)
+                f.write(sch.mod.script())
+                f.write("\n")
+                f.write(str(trace))
+                f.write("\n")
+                f.write(str(record.run_secs[0].value))
+                f.write("\n")
     return sch.mod, trace
 
 
@@ -189,10 +203,10 @@ def matmul1(a: T.handle, b: T.handle, c: T.handle, k: T.int32) -> None:
 @T.prim_func
 def matmul1Static(a: T.handle, b: T.handle, c: T.handle) -> None:
     T.func_attr({"global_symbol": "matmul", "tir.noalias": True})
-    A = T.match_buffer(a, (256, 768), "float16")
-    B = T.match_buffer(b, (768, 2304), "float16")
-    C = T.match_buffer(c, (256, 2304), "float16")
-    for i, j, k in T.grid(256, 2304, 768):
+    A = T.match_buffer(a, (2048, 512), "float16")
+    B = T.match_buffer(b, (512, 2048), "float16")
+    C = T.match_buffer(c, (2048, 2048), "float16")
+    for i, j, k in T.grid(2048, 2048, 512):
         with T.block("C"):
             vi, vj, vk = T.axis.remap("SSR", [i, j, k])
             with T.init():
@@ -206,10 +220,15 @@ def schedule_matmul(sch, d1_val, d2_val, d3_val):
     i, j, k = sch.get_loops(C)
     i0, i1 = sch.split(i, [None, d1_val])
     j0, j1 = sch.split(j, [None, d2_val])
+    sch.reorder(i0, j0, i1, j1, k)
+    sch.blockize(i1)
     k0, k1 = sch.split(k, [None, d3_val])
-    sch.reorder(i0, j0, k0, i1, j1, k1)
+    sch.reorder(k0, i1, j1, k1)
+    sch.blockize(i1)
+    sch.bind(loop=i0, thread_axis="blockIdx.y")
+    sch.bind(loop=j0, thread_axis="blockIdx.x")
 
-    sch_128_128_32(sch)
+    sch_128_128_32_v2(sch, i0, j0)
 
 
 def test(mod, d1_val, d2_val, d3_val, k=1, build=False):
@@ -247,9 +266,7 @@ def test(mod, d1_val, d2_val, d3_val, k=1, build=False):
 
 
 if __name__ == "__main__":
-    """
-    mod, trace = microkernel_tuning(ALL_MICROKERNELS[7])
+    mod, trace = tuning(matmul1Static)
     mod.show()
     print(trace)
-    """
-    test(matmul1, 128, 128, 32, 1, False)
+    # test(matmul1, 32, 16, 32, 1, False)

@@ -1,1 +1,1 @@
-from .microkernel_128_128_32 import sch_128_128_32
+from .microkernel_128_128_32 import sch_128_128_32_v1, sch_128_128_32_v2
