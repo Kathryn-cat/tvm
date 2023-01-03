@@ -55,6 +55,11 @@ Region SimplifyAndNarrowBufferRegionFromNDIntSet(
     Range range = int_set.CoverRange(Range(/*begin=*/0, /*end=*/original_shape[i]));
     PrimExpr min = analyzer->Simplify(tvm::max(0, range->min));
     PrimExpr extent = analyzer->Simplify(tvm::min(original_shape[i], range->extent));
+    // std::cout << "original shape: " << original_shape << std::endl;
+    // std::cout << "current original shape: " << original_shape[i] << ", i: " << i << std::endl;
+    // std::cout << "range: " << Range(0, original_shape[i]) << std::endl;
+    // std::cout << "range extent: " << range->extent << std::endl;
+    // std::cout << "extent: " << extent << std::endl;
 
     // Check the buffer region is not loop dependent, since loop dependent
     // allocation is not supported yet.
@@ -65,6 +70,7 @@ Region SimplifyAndNarrowBufferRegionFromNDIntSet(
     if (UsesVar(extent, is_loop_var)) {
       // try estimate a constant upperbound on region's extent
       int64_t upperbound = analyzer->const_int_bound(extent)->max_value;
+      // std::cout << "upperbound: " << upperbound << std::endl;
       if (upperbound != arith::ConstIntBound::kPosInf) {
         extent = make_const(extent->dtype, upperbound);
       } else {
@@ -112,7 +118,7 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
           if (obj->IsInstance<VarNode>()) {
             const Var& var = GetRef<Var>(obj.as<VarNode>());
             if (bindVars.find(var->name_hint) == bindVars.end()) {
-              analyzer->Bind(var, Range::FromMinExtent(Integer(1), var + Integer(1)), false);
+              analyzer->Bind(var, Range::FromMinExtent(Integer(1), Integer(4097)), false);
               bindVars.insert({var->name_hint, var});
             }
           }
@@ -261,6 +267,7 @@ class BufferAccessRegionCollector : public StmtExprVisitor {
       }
     }
     // Step 6. Update buffer_access_region_ from relaxed_accesses_ for inner buffers.
+    // std::cout << op->name_hint << std::endl;
     for (const Buffer& buffer : op->alloc_buffers) {
       auto it = relaxed_accesses_.find(buffer);
       ICHECK(it != relaxed_accesses_.end())

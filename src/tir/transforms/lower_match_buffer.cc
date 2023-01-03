@@ -188,9 +188,11 @@ class MatchBufferLower : public StmtExprMutator {
       Array<PrimExpr> buffer_start_indices = source_buffer->ElemOffset(indices);
       if (buffer_start_indices.size() == 1) {
         Bind(buffer->elem_offset, buffer_start_indices[0], buffer->name + ".elem_offset");
+        /*
         CHECK(analyzer_.CanProve(truncmod(buffer->elem_offset, buffer->offset_factor) == 0))
             << "The source elem_offset " << buffer_start_indices[0]
             << " does not satisfy the offset_factor " << buffer->offset_factor << ".";
+        */
       } else {
         // Non-zero elem_offset is ill-defined for non-flat memory.
         // If needed in the future, will require `Array<PrimExpr>

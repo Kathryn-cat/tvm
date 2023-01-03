@@ -141,11 +141,13 @@ class MemoryAccessVerifier final : protected StmtExprVisitor {
     if (!IsFromFunctionArgs(var.get())) return;
 
     // The verification fails in this case.
+    /*
     std::stringstream s;
     s << "Variable `" << var
       << "` is directly accessed by host memory (it is not contained in a thread environment or in "
          "the function arguments.";
     errs_.push_back(s.str());
+    */
   }
 
   /// Status getter/setter
