@@ -53,6 +53,25 @@ def tuning(mod):
             mod=mod,
             target=target,
             num_trials_per_iter=32,
-            max_trials_global=2000,
+            max_trials_global=500,
             work_dir="logs",
         )
+        # find the best trace
+        min_run_time = 1.0
+        best_idx = -1
+        for i, record in enumerate(sch.get_all_tuning_records()):
+            if record.run_secs[0].value < min_run_time:
+                min_run_time = record.run_secs[0].value
+                best_idx = i
+        print(f"best tuning record is {best_idx}, min_run_time is {min_run_time}")
+        trace = sch.get_all_tuning_records()[best_idx].trace
+    print("trace:")
+    print(trace)
+    sch = tir.Schedule(mod, debug_mask="all")
+    trace.apply_to_schedule(sch, False)
+    sch.mod.show()
+    return sch.mod
+
+
+if __name__ == "__main__":
+    tuning(hgemm_4096)

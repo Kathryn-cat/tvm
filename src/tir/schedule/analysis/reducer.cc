@@ -555,7 +555,13 @@ bool ReductionIterNotIndexOutputBuffer(const Block& block) {
   // Step 2. Check if the reduction block iters are used to index the output buffer.
   std::unordered_set<const BufferNode*> buffer_written;
   buffer_written.reserve(block->writes.size());
+  /*
+  for (const BufferRegion& read_region : block->reads) {
+    std::cout << "reads: " << read_region << std::endl;
+  }
+  */
   for (const BufferRegion& write_region : block->writes) {
+    // std::cout << "writes: " << write_region << std::endl;
     buffer_written.insert(write_region->buffer.get());
   }
   auto f_uses_reduction_block_var = [&](const PrimExpr& expr) -> bool {
@@ -574,7 +580,8 @@ bool ReductionIterNotIndexOutputBuffer(const Block& block) {
     }
     ICHECK(buffer_written.count(store->buffer.get()))
         << "ValueError: The buffer \"" << store->buffer
-        << "\" is written in the block but is not in the block's signature";
+        << "\" is written in the block but is not in the block's signature"
+        << ", value for block is " << store->value;
     for (const PrimExpr& index : store->indices) {
       if (f_uses_reduction_block_var(index)) {
         affected = true;
