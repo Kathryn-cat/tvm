@@ -1,6 +1,8 @@
 import tvm
 from tvm.script import tir as T
 
+# pylint: disable=no-member, invalid-name
+
 
 @tvm.script.ir_module
 class Module:
