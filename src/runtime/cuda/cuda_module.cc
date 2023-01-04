@@ -162,6 +162,7 @@ class CUDAWrappedFunc {
   }
   // invoke the function with void arguments
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
+    std::cout << "Reach CUDA checking!" << std::endl;
     int device_id;
     CUDA_CALL(cudaGetDevice(&device_id));
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
