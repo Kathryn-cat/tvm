@@ -26,7 +26,8 @@ if __name__ == "__main__":
     else:
         from prototype import Module
     mod = Module
-    # mod.show()
+    mod.show()
+    """
     matmul_mod = tvm.build(mod, target="cuda")
     print("Built successfully")
     dev = tvm.cuda(0)
@@ -41,3 +42,4 @@ if __name__ == "__main__":
     # evaluator = matmul_mod.time_evaluator("StagedModule", dev, number=10)
     # time = evaluator(A_nd, B_nd, C_nd).mean
     # print(time)
+    """
