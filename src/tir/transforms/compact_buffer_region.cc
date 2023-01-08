@@ -623,7 +623,9 @@ namespace transform {
 
 Pass CompactBufferAllocation() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return CompactBufferAllocation(std::move(f));
+    auto res = CompactBufferAllocation(std::move(f));
+    // LOG(INFO) << AsTVMScript(res);
+    return res;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.CompactBufferAllocation", {});
 }
