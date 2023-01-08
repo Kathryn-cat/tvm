@@ -53,6 +53,10 @@ def apply_sch(sch):
     sch.bind(loop=j0, thread_axis="blockIdx.x")
     sch.bind(loop=i6, thread_axis="threadIdx.y")
 
+    A_shared = sch.cache_read(C, 1, "shared")
+    B_shared = sch.cache_read(C, 2, "shared")
+    C_shared = sch.cache_write(C, 0, "shared")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
