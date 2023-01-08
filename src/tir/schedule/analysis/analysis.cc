@@ -302,9 +302,11 @@ int CheckReductionBlockErrorCode(const ScheduleState& self, const StmtSRef& bloc
                                  const StmtSRef& scope_root_sref) {
   const BlockNode* block = TVM_SREF_TO_BLOCK(block_sref);
   // Cond 1. The block has the `init` statement.
+  /*
   if (!block->init.defined()) {
     return 1;
   }
+  */
   // Cond 2. All the block bindings are quasi-affine expressions.
   if (!self->IsAffineBlockBinding(block_sref)) {
     return 2;
@@ -958,8 +960,8 @@ std::pair<Array<StmtSRef>, std::vector<int>> CollectComputeLocation(const Schedu
     return std::make_pair(location_srefs, location_indices);
   }
 
-  // Step 4. Collect the loops outside the first consumer and locate the boundary loop. The position
-  // of the boundary loop reveals the number of possible additional candidates.
+  // Step 4. Collect the loops outside the first consumer and locate the boundary loop. The
+  // position of the boundary loop reveals the number of possible additional candidates.
   Array<StmtSRef> loop_srefs = GetLoops(consumers[0]);
   size_t lca_pos =
       std::find(loop_srefs.begin(), loop_srefs.end(), loop_boundary) - loop_srefs.begin();
@@ -1046,12 +1048,14 @@ ProducerConsumerSplit ProducerConsumerSplit::Find(
           first_consumer_position_(first_consumer_position) {}
 
     String FastErrorString() const final {
-      return "ScheduleError: Cannot find the insertion point that satisfies the producer-consumer "
+      return "ScheduleError: Cannot find the insertion point that satisfies the "
+             "producer-consumer "
              "constraint";
     }
 
     String DetailRenderTemplate() const final {
-      return "Cannot find the insertion point that satisfies the producer-consumer constraint. In "
+      return "Cannot find the insertion point that satisfies the producer-consumer constraint. "
+             "In "
              "0-based indexing, the last producer appears in subtree " +
              std::to_string(last_producer_position_) +
              ", and the first consumer appears in subtree " +
@@ -1623,7 +1627,8 @@ struct TensorIntrinDescInfo {
    *         block.
    */
   const BlockRealizeNode* desc_block = nullptr;
-  /*! \brief The loops of the description function, in the order from outer loops to inner ones. */
+  /*! \brief The loops of the description function, in the order from outer loops to inner ones.
+   */
   std::vector<const tir::ForNode*> desc_loops;
   /*! \brief The loop variables. */
   std::unordered_set<const tir::VarNode*> desc_loop_vars;
@@ -1713,8 +1718,8 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
   ICHECK(block_loops.size() == iter_types_block.size());
 
   // We assume that the orders of iter_vars in the target and the desc block are consistent.
-  // Based on that assumption, the following logic supports arbitrary permutations of a loop order,
-  // such as
+  // Based on that assumption, the following logic supports arbitrary permutations of a loop
+  // order, such as
 
   // for k:
   //   for i:
@@ -1750,7 +1755,8 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
 
     const IntImmNode* int_desc_extent = desc_loop->extent.as<IntImmNode>();
 
-    // Step 3.2. Find the corresponding iter_value of the target block with a matching iterator type
+    // Step 3.2. Find the corresponding iter_value of the target block with a matching iterator
+    // type
     PrimExpr block_bind;
     int current_block_ind = next_block_ind;
     for (; current_block_ind >= 0; --current_block_ind) {
@@ -1853,9 +1859,9 @@ class AutoTensorizeMappingProposer {
   void CollectFeasibleSet() {
     // Collect the set of potential iter var mapping between the workload and the tensor intrin.
     // We analyze the appearance of each variable in the buffer indices of each buffer on LHS and
-    // RHS. The appearance of a variable in the buffer indices is encoded as bit-masks (BufferMask).
-    // Variables on the LHS and the RHS with the same bit-mask and the same iter type are potential
-    // mappings.
+    // RHS. The appearance of a variable in the buffer indices is encoded as bit-masks
+    // (BufferMask). Variables on the LHS and the RHS with the same bit-mask and the same iter
+    // type are potential mappings.
     //
     // For example, consider the conv2d case. We will try to match the workload
     // conv2d[n, h, w, c] = sum_{rh, rw, rc} X[n, h + rh, w + rw, c + rc] * W[rh, rw, rc, c]
@@ -1863,11 +1869,11 @@ class AutoTensorizeMappingProposer {
     // C[m, n] = sum_{k} A[m, k] * B[k, n]
     // First we extract the correspondence of the buffers: conv2d <=> C, A <=> X, B <=> W.
     // Then for each variable, we extract the buffers where it is used for indexing.
-    // Take the variable m on the RHS as an example. m is used to index buffer A and C. On the LHS,
-    // we will find the variables used to index only the exact corresponding buffers conv2d and X
-    // (the variable is not allowed to index other buffers). In this case, n, h, w is used to index
-    // both buffer conv2d and W, and not in other buffers. Therefore, {n, h, w} <=> m is a potential
-    // mapping.
+    // Take the variable m on the RHS as an example. m is used to index buffer A and C. On the
+    // LHS, we will find the variables used to index only the exact corresponding buffers conv2d
+    // and X (the variable is not allowed to index other buffers). In this case, n, h, w is used
+    // to index both buffer conv2d and W, and not in other buffers. Therefore, {n, h, w} <=> m is
+    // a potential mapping.
 
     // Note: the mapping is not unique when multiple variables on RHS has the same bit-mask.
     // This is currently not supported.
@@ -1948,11 +1954,11 @@ class AutoTensorizeMappingProposer {
   }
 
   Array<IndexMap> ProposeAllFuseMapping() {
-    // Now we have calcuated potential mapping for each iter var on LHS. For iters on LHS mapped to
-    // the same iter on RHS, they will be fused in the original order in LHS block iters. We will
-    // generate IndexMap to represent such fusion on LHS. For example, if n, h, w on LHS are mapped
-    // to the same iter var on RHS, we will produce index map `lambda n, h, w: fuse(n, h, w)`, where
-    // fuse(v0, .., vn) = ((v0 * v1_extent + v1) + ... ) * vn_extent + vn
+    // Now we have calcuated potential mapping for each iter var on LHS. For iters on LHS mapped
+    // to the same iter on RHS, they will be fused in the original order in LHS block iters. We
+    // will generate IndexMap to represent such fusion on LHS. For example, if n, h, w on LHS are
+    // mapped to the same iter var on RHS, we will produce index map `lambda n, h, w: fuse(n, h,
+    // w)`, where fuse(v0, .., vn) = ((v0 * v1_extent + v1) + ... ) * vn_extent + vn
 
     // the parameters of the result index map, each parameter corresponds to a LHS iter
     Array<Var> index_map_src;
