@@ -19,10 +19,13 @@
 import functools
 import inspect
 import types
-from typing import Callable, Dict, Union, Optional, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
+
 import numpy as np  # type: ignore
+
 import tvm.ir
 from tvm.runtime import NDArray
+
 from . import _ffi_api
 from .legalize_ops.common import LegalizeFunc
 
@@ -350,6 +353,34 @@ def MergeCompositeFunctions() -> tvm.ir.transform.Pass:
         The registered pass for merging composite functions.
     """
     return _ffi_api.MergeCompositeFunctions()  # type: ignore
+
+
+def Transform2GEMM() -> tvm.ir.transform.Pass:
+    """Transform an einsum computation to GEMM/HGEMM for dispatching.
+    Returns
+    -------
+    ret : tvm.transform.Pass
+        The registered pass for transformation to GEMM/HGEMM.
+    """
+    return _ffi_api.Transform2GEMM()  # type: ignore
+
+
+def SplitCallTIRByPattern(patterns, fcodegen) -> tvm.ir.transform.Pass:
+    """Split a PrimFunc into 2 parts: the first part is a TIR PrimFunc which is
+       matched with some cutlass kernels, and the second part is the rest of the original
+       PrimFunc that is not fused with cutlass kernels.
+    Parameters
+    ----------
+    patterns : List[PrimFunc]
+        The list of patterns to match.
+    fcodegen: Callable[[List[MatchResult]], List[Object]]
+        The function to generate the code for the matched patterns.
+    Returns
+    -------
+    ret : tvm.transform.Pass
+        The registered pass for splitting call_tir.
+    """
+    return _ffi_api.SplitCallTIRByPattern(patterns, fcodegen)  # type: ignore
 
 
 def LiftTransformParams() -> tvm.ir.transform.Pass:
