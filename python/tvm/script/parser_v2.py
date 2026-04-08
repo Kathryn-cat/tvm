@@ -72,6 +72,10 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.var_table.define(name, ann)  # name resolves to Buffer
                     params.append(var)
                     buffer_map[var] = ann
+                elif isinstance(ann, tvm.ir.PointerType):
+                    var = tvm.tirx.Var(name, ann)
+                    parser.var_table.define(name, var)
+                    params.append(var)
                 else:
                     dtype = "int32"
                     if isinstance(ann, str):
@@ -114,10 +118,17 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.handle_if,
                 ) = old
 
-            # Wrap non-Stmt results (e.g. return expr) in Evaluate
+            # Collect func_attr markers, sblock_alloc_buffer, and wrap
+            extra_attrs = {}
+            root_alloc_bufs = []
             wrapped = []
             for s in body_stmts:
-                if isinstance(s, tvm.tirx.Stmt):
+                if isinstance(s, _FuncAttrMarker):
+                    extra_attrs.update(s.attrs)
+                elif isinstance(s, _SBlockAllocBufferMarker):
+                    parser.var_table.define(s.buf.name, s.buf)
+                    root_alloc_bufs.append(s.buf)
+                elif isinstance(s, tvm.tirx.Stmt):
                     wrapped.append(s)
                 elif s is not None:
                     wrapped.append(tvm.tirx.Evaluate(s))
@@ -131,6 +142,21 @@ class _PrimFuncSurface(SurfaceObject):
             else:
                 body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
 
+            # Wrap in root SBlockRealize if needed
+            has_sblocks = any(
+                isinstance(s, tvm.tirx.SBlockRealize)
+                for s in (body_stmts if len(body_stmts) > 1 else [body])
+            ) or root_alloc_bufs
+            if has_sblocks:
+                root_sb = tvm.tirx.SBlock(
+                    [], [], [], "root", body, init=None,
+                    alloc_buffers=root_alloc_bufs, match_buffers=[],
+                    annotations={},
+                )
+                body = tvm.tirx.SBlockRealize(
+                    [], tvm.tirx.IntImm("bool", 1), root_sb,
+                )
+
             # Collect final buffer_map (may have been updated by match_buffer)
             buffer_map = getattr(parser, '_tir_buffer_map', buffer_map)
 
@@ -138,6 +164,8 @@ class _PrimFuncSurface(SurfaceObject):
             pf = tvm.tirx.PrimFunc(params, body, buffer_map=buffer_map)
             if not self._private:
                 pf = pf.with_attr("global_symbol", func_name)
+            for k, v in extra_attrs.items():
+                pf = pf.with_attr(k, v)
             return pf
 
 
@@ -231,6 +259,163 @@ class _GridSurfaceInstance(SurfaceObject):
             )
 
         return body
+
+
+# ============================================================================
+# SBlock markers and surface objects
+# ============================================================================
+
+
+class _SBlockAllocBufferMarker:
+    """Marker for T.sblock_alloc_buffer — collected by root sblock."""
+    def __init__(self, buf, alloc_node):
+        self.buf = buf
+        self.alloc_node = alloc_node
+
+
+class _SBlockAttrMarker:
+    """Marker for T.sblock_attr({...}) — collected by sblock surface."""
+    def __init__(self, attrs):
+        self.attrs = attrs
+
+
+class _AxisBinding:
+    """Marker for T.axis.spatial(extent, value) — collected by sblock."""
+    def __init__(self, extent, value, iter_type):
+        self.extent = extent
+        self.value = value
+        self.iter_type = iter_type  # 0=spatial, 1=reduce, 2=scan, 3=opaque
+
+
+class _ReadsMarker:
+    """Marker for T.reads(...)."""
+    def __init__(self, regions):
+        self.regions = regions
+
+
+class _WritesMarker:
+    """Marker for T.writes(...)."""
+    def __init__(self, regions):
+        self.regions = regions
+
+
+class _AxisModule:
+    """T.axis.spatial / T.axis.reduce / T.axis.remap."""
+    @staticmethod
+    def spatial(extent, value):
+        if isinstance(extent, int):
+            extent = tvm.tirx.IntImm("int32", extent)
+        return _AxisBinding(extent, value, 0)
+
+    @staticmethod
+    def reduce(extent, value):
+        if isinstance(extent, int):
+            extent = tvm.tirx.IntImm("int32", extent)
+        return _AxisBinding(extent, value, 1)
+
+    @staticmethod
+    def scan(extent, value):
+        if isinstance(extent, int):
+            extent = tvm.tirx.IntImm("int32", extent)
+        return _AxisBinding(extent, value, 2)
+
+    @staticmethod
+    def opaque(extent, value):
+        if isinstance(extent, int):
+            extent = tvm.tirx.IntImm("int32", extent)
+        return _AxisBinding(extent, value, 3)
+
+
+class _SBlockSurface(SurfaceObject):
+    """Surface object for `with T.sblock("name"):` → SBlockRealize/SBlock."""
+
+    def __call__(self, name):
+        return _SBlockSurfaceInstance(name)
+
+
+class _SBlockSurfaceInstance(SurfaceObject):
+    """Instance for `with T.sblock("B") as [vi, vj]:` → parse_with."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def parse_with(self, parser, node):
+        # Define as_var if present (for root block, lhs may be None)
+        # Parse body — collect axis bindings, reads, writes, sblock_attr
+        body_stmts = parser.visit_body(node.body)
+
+        iter_vars = []
+        iter_values = []
+        reads = []
+        writes = []
+        annotations = {}
+        alloc_buffers = []
+        real_body = []
+
+        for s in body_stmts:
+            if isinstance(s, _AxisBinding):
+                # The axis binding was assigned: vi = T.axis.spatial(128, i0)
+                # We need to find the var from make_assign
+                iter_vars.append(s)
+                iter_values.append(s.value)
+            elif isinstance(s, _ReadsMarker):
+                reads = s.regions
+            elif isinstance(s, _WritesMarker):
+                writes = s.regions
+            elif isinstance(s, _SBlockAttrMarker):
+                annotations.update(s.attrs)
+            elif isinstance(s, _SBlockAllocBufferMarker):
+                alloc_buffers.append(s.buf)
+            elif isinstance(s, tvm.tirx.Stmt):
+                real_body.append(s)
+
+        # Build IterVars
+        tir_iter_vars = []
+        tir_iter_values = []
+        for ab in iter_vars:
+            dom = tvm.ir.Range(tvm.tirx.IntImm("int32", 0), ab.extent)
+            var = ab._var  # set by _tir_make_assign when it sees _AxisBinding
+            iv = tvm.tirx.IterVar(dom, var, ab.iter_type, "")
+            tir_iter_vars.append(iv)
+            tir_iter_values.append(ab.value)
+
+        # Build body
+        if len(real_body) == 1:
+            body = real_body[0]
+        elif len(real_body) > 1:
+            body = tvm.tirx.SeqStmt(real_body)
+        else:
+            body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
+
+        # Convert reads/writes to BufferRegion lists
+        tir_reads = _to_buffer_regions(reads)
+        tir_writes = _to_buffer_regions(writes)
+
+        sb = tvm.tirx.SBlock(
+            tir_iter_vars, tir_reads, tir_writes,
+            self._name, body, init=None,
+            alloc_buffers=alloc_buffers, match_buffers=[],
+            annotations=annotations,
+        )
+        pred = tvm.tirx.IntImm("bool", 1)
+        return tvm.tirx.SBlockRealize(tir_iter_values, pred, sb)
+
+
+def _to_buffer_regions(regions):
+    """Convert parsed buffer index expressions to BufferRegion list."""
+    if not regions:
+        return []
+    result = []
+    for r in regions:
+        if isinstance(r, tvm.tirx.BufferRegion):
+            result.append(r)
+        elif isinstance(r, tvm.tirx.BufferLoad):
+            # buf[vi, vj] → BufferRegion with point ranges
+            ranges = []
+            for idx in r.indices:
+                ranges.append(tvm.ir.Range(idx, tvm.tirx.IntImm("int32", 1)))
+            result.append(tvm.tirx.BufferRegion(r.buffer, ranges))
+    return result
 
 
 class _AttrSurfaceInstance(SurfaceObject):
@@ -359,11 +544,37 @@ def _tir_make_for(parser, var_name, start, end, step, body_node):
 def _tir_make_assign(parser, node, rhs_val):
     """TIR assign callback: handles alloc_buffer, match_buffer, Bind, and plain bindings."""
     name = node.lhs.name
+    if isinstance(rhs_val, _VarDeclMarker):
+        var = tvm.tirx.Var(name, rhs_val.dtype)
+        parser.var_table.define(name, var)
+        return None
+    if isinstance(rhs_val, _AxisBinding):
+        var = tvm.tirx.Var(name, "int32")
+        parser.var_table.define(name, var)
+        rhs_val._var = var
+        return rhs_val
+    if isinstance(rhs_val, _SBlockAllocBufferMarker):
+        # Set buffer name to match variable name
+        scope = rhs_val.buf.scope() if callable(rhs_val.buf.scope) else rhs_val.buf.scope
+        buf = tvm.tirx.decl_buffer(
+            rhs_val.buf.shape, rhs_val.buf.dtype, name=name,
+            scope=scope,
+        )
+        rhs_val.buf = buf
+        parser.var_table.define(name, buf)
+        return rhs_val  # marker collected by PrimFunc or SBlock
     if isinstance(rhs_val, _MatchBufferResult):
         # match_buffer: add to buffer_map, define buffer in var_table
         buf = rhs_val.buffer
-        # Set buffer name to match the LHS variable name
-        buf = tvm.tirx.decl_buffer(buf.shape, buf.dtype, name=name)
+        # Set buffer name to match the LHS variable name, preserve all params
+        scope = buf.scope() if callable(buf.scope) else buf.scope
+        buf = tvm.tirx.decl_buffer(
+            buf.shape, buf.dtype, name=name,
+            strides=list(buf.strides) if buf.strides else [],
+            elem_offset=buf.elem_offset if buf.elem_offset else None,
+            scope=scope,
+            offset_factor=buf.offset_factor,
+        )
         param_var = rhs_val.param_var
         # Find the matching param Var and add to buffer_map
         if hasattr(parser, '_tir_buffer_map'):
@@ -381,7 +592,17 @@ def _tir_make_assign(parser, node, rhs_val):
         return alloc_node
     # If RHS is a PrimExpr (not a Stmt), create a Bind node
     if isinstance(rhs_val, tvm.tirx.PrimExpr):
-        var = tvm.tirx.Var(name, rhs_val.dtype)
+        # Check for type annotation on the AST node
+        dtype = rhs_val.dtype
+        if node.annotation is not None:
+            ann = parser.eval_expr(node.annotation)
+            if isinstance(ann, _DtypeHelper):
+                dtype = ann._dtype
+            elif isinstance(ann, tvm.ir.PointerType):
+                dtype = ann
+            elif isinstance(ann, str):
+                dtype = ann
+        var = tvm.tirx.Var(name, dtype)
         parser.var_table.define(name, var)
         return tvm.tirx.Bind(var, rhs_val)
     parser.var_table.define(name, rhs_val)
@@ -394,9 +615,25 @@ def _tir_make_store(target, value, indices):
         value = tvm.tirx.IntImm("int32", value)
     elif isinstance(value, float):
         value = tvm.tirx.FloatImm("float32", value)
-    # Convert int indices to IntImm
-    indices = [tvm.tirx.IntImm("int32", i) if isinstance(i, int) else i for i in indices]
-    return tvm.tirx.BufferStore(target, value, indices)
+    # Convert indices
+    converted = []
+    for i in indices:
+        if isinstance(i, int):
+            converted.append(tvm.tirx.IntImm("int32", i))
+        elif isinstance(i, slice):
+            # slice(0, 8) → Ramp(0, 1, lanes=8-0)
+            start = i.start or 0
+            stop = i.stop
+            if isinstance(start, int):
+                start = tvm.tirx.IntImm("int32", start)
+            if isinstance(stop, int):
+                lanes = i.stop - (i.start or 0)
+            else:
+                lanes = stop - start
+            converted.append(tvm.tirx.Ramp(start, tvm.tirx.IntImm("int32", 1), int(lanes)))
+        else:
+            converted.append(i)
+    return tvm.tirx.BufferStore(target, value, converted)
 
 
 def _tir_evaluate(value):
@@ -415,6 +652,18 @@ def _tir_decl_buffer(shape, dtype="float32", data=None, scope=""):
     return buf, tvm.tirx.DeclBuffer(buf)
 
 
+class _FuncAttrMarker:
+    """Marker for T.func_attr({...}) — collected by PrimFunc surface object."""
+    def __init__(self, attrs):
+        self.attrs = attrs
+
+
+class _VarDeclMarker:
+    """Marker for T.int32() — declares a Var with given dtype."""
+    def __init__(self, dtype):
+        self.dtype = dtype
+
+
 class _MatchBufferResult:
     """Marker returned by T.match_buffer for _tir_make_assign to handle."""
     def __init__(self, param_var, buffer):
@@ -422,12 +671,21 @@ class _MatchBufferResult:
         self.buffer = buffer
 
 
-def _tir_match_buffer(param, shape, dtype="float32"):
-    """T.match_buffer(A, (n,), 'int64') → MatchBufferResult for make_assign."""
+def _tir_match_buffer(param, shape, dtype="float32", scope="",
+                      strides=None, offset_factor=0, elem_offset=None,
+                      align=64, **kwargs):
+    """T.match_buffer(A, (n,), 'int64', scope=..., strides=..., ...) → MatchBufferResult."""
     if isinstance(shape, tuple):
         shape = list(shape)
     shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
-    buf = tvm.tirx.decl_buffer(shape, dtype)
+    if strides is not None and isinstance(strides, (list, tuple)):
+        strides = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in strides]
+    buf = tvm.tirx.decl_buffer(
+        shape, dtype, scope=scope,
+        strides=strides or [],
+        elem_offset=elem_offset,
+        offset_factor=offset_factor,
+    )
     return _MatchBufferResult(param, buf)
 
 
@@ -474,20 +732,26 @@ class _DtypeHelper:
     def __init__(self, dtype):
         self._dtype = dtype
     def __call__(self, *args):
+        if len(args) == 0:
+            # T.int32() with no args — marker for "declare a Var with this dtype"
+            return _VarDeclMarker(self._dtype)
         if len(args) == 1:
             value = args[0]
             if isinstance(value, str):
                 if value in ("nan", "inf", "-inf") or "." in value:
                     value = float(value)
                 else:
-                    # Could be a dtype string like T.handle("int32", ...) — return self
-                    return self
+                    return self  # dtype string like T.handle("int32") — return self
             if "float" in self._dtype:
                 return tvm.tirx.FloatImm(self._dtype, float(value))
             if self._dtype == "handle":
                 return self  # T.handle(something) as annotation
             return tvm.tirx.IntImm(self._dtype, int(value))
-        # Multiple args: T.handle("int32", "global") — just return self as annotation
+        # Multiple args: T.handle("int32", "global") → PointerType
+        if self._dtype == "handle" and len(args) >= 1:
+            elem_dtype = args[0]
+            scope = args[1] if len(args) > 1 else ""
+            return tvm.ir.PointerType(tvm.ir.PrimType(elem_dtype), scope)
         return self
     def __repr__(self):
         return self._dtype
@@ -513,6 +777,43 @@ class _TIRModule:
     bool = _DtypeHelper("bool")
     handle = _DtypeHelper("handle")  # T.handle as annotation; T.handle(...) returns Var
     Buffer = staticmethod(_tir_buffer)
+
+    sblock = _SBlockSurface()
+    axis = _AxisModule
+
+    @staticmethod
+    def sblock_alloc_buffer(shape, dtype="float32", scope=""):
+        """T.sblock_alloc_buffer(shape) → marker for root sblock."""
+        if isinstance(shape, tuple):
+            shape = list(shape)
+        shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
+        buf = tvm.tirx.decl_buffer(shape, dtype, scope=scope)
+        return _SBlockAllocBufferMarker(buf, tvm.tirx.AllocBuffer(buf, {}))
+
+    @staticmethod
+    def sblock_attr(attrs_dict):
+        """T.sblock_attr({...}) → marker collected by sblock."""
+        return _SBlockAttrMarker(attrs_dict)
+
+    @staticmethod
+    def reads(*args):
+        """T.reads(buf[vi, vj]) → marker."""
+        return _ReadsMarker(list(args))
+
+    @staticmethod
+    def writes(*args):
+        """T.writes(buf[vi, vj]) → marker."""
+        return _WritesMarker(list(args))
+
+    @staticmethod
+    def func_attr(attrs_dict):
+        """T.func_attr({...}) → marker collected by PrimFunc."""
+        return _FuncAttrMarker(attrs_dict)
+
+    @staticmethod
+    def vscale():
+        """T.vscale() → call_intrin('int32', 'tirx.vscale')."""
+        return tvm.tirx.call_intrin("int32", "tirx.vscale")
 
     @staticmethod
     def exp(val):
@@ -563,6 +864,178 @@ class _TIRModule:
         return tvm.tirx.Broadcast(value, lanes)
 
     @staticmethod
+    def min(a, b):
+        return tvm.tirx.min(a, b)
+
+    @staticmethod
+    def max(a, b):
+        return tvm.tirx.max(a, b)
+
+    @staticmethod
+    def Div(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.Div(a, b)
+
+    @staticmethod
+    def Mod(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.Mod(a, b)
+
+    @staticmethod
+    def Select(cond, true_val, false_val):
+        return tvm.tirx.Select(cond, true_val, false_val)
+
+    @staticmethod
+    def where(cond, true_val, false_val):
+        return tvm.tirx.Select(cond, true_val, false_val)
+
+    @staticmethod
+    def assume(cond):
+        return tvm.tirx.call_intrin("bool", "tirx.assume", cond)
+
+    @staticmethod
+    def Ramp(base, stride, lanes):
+        if isinstance(base, int): base = tvm.tirx.IntImm("int32", base)
+        if isinstance(stride, int): stride = tvm.tirx.IntImm("int32", stride)
+        return tvm.tirx.Ramp(base, stride, lanes)
+
+    @staticmethod
+    def Shuffle(vectors, indices):
+        return tvm.tirx.Shuffle(vectors, indices)
+
+    @staticmethod
+    def Let(value, body=None, **kwargs):
+        # T.Let is complex, skip body for now
+        return value
+
+    @staticmethod
+    def call_packed(func_name, *args, dtype="void"):
+        return tvm.tirx.call_packed(func_name, *args, dtype=dtype)
+
+    @staticmethod
+    def call_pure_extern(dtype, func_name, *args):
+        return tvm.tirx.call_pure_extern(dtype, func_name, *args)
+
+    @staticmethod
+    def call_intrin(dtype, intrin_name, *args):
+        return tvm.tirx.call_intrin(dtype, intrin_name, *args)
+
+    @staticmethod
+    def target(key):
+        return tvm.tirx.call_intrin("bool", "tirx.target", key)
+
+    @staticmethod
+    def reinterpret(dtype, val):
+        """T.reinterpret('float32', val) → reinterpret(dtype, val)."""
+        if isinstance(val, int):
+            val = tvm.tirx.IntImm("int32", val)
+        return tvm.tirx.reinterpret(dtype, val)
+
+    @staticmethod
+    def truncmod(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.Mod(a, b)
+
+    @staticmethod
+    def truncdiv(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.Div(a, b)
+
+    @staticmethod
+    def FloorDiv(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.FloorDiv(a, b)
+
+    @staticmethod
+    def FloorMod(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.FloorMod(a, b)
+
+    @staticmethod
+    def ceildiv(a, b):
+        if isinstance(a, int): a = tvm.tirx.IntImm("int32", a)
+        if isinstance(b, int): b = tvm.tirx.IntImm("int32", b)
+        return tvm.tirx.ceildiv(a, b)
+
+    @staticmethod
+    def abs(val):
+        return tvm.tirx.abs(val)
+
+    @staticmethod
+    def sqrt(val):
+        return tvm.tirx.sqrt(val)
+
+    @staticmethod
+    def log(val):
+        return tvm.tirx.log(val)
+
+    @staticmethod
+    def log2(val):
+        return tvm.tirx.log(val) / tvm.tirx.log(tvm.tirx.FloatImm("float32", 2.0))
+
+    @staticmethod
+    def sigmoid(val):
+        return tvm.tirx.sigmoid(val)
+
+    @staticmethod
+    def tanh(val):
+        return tvm.tirx.tanh(val)
+
+    @staticmethod
+    def power(base, exp):
+        return tvm.tirx.power(base, exp)
+
+    @staticmethod
+    def popcount(val):
+        return tvm.tirx.popcount(val)
+
+    @staticmethod
+    def shift_left(a, b):
+        return a << b
+
+    @staticmethod
+    def shift_right(a, b):
+        return a >> b
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return a & b
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return a | b
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return a ^ b
+
+    @staticmethod
+    def bitwise_not(a):
+        return ~a
+
+    @staticmethod
+    def likely(cond):
+        return tvm.tirx.call_intrin("bool", "tirx.likely", cond)
+
+    @staticmethod
+    def comm_reducer(combiner_fn, identity):
+        return tvm.tirx.CommReducer(combiner_fn, identity)
+
+    @staticmethod
+    def float32x4(*args):
+        return _DtypeHelper("float32x4")
+
+    @staticmethod
+    def float32x8(*args):
+        return _DtypeHelper("float32x8")
+
+    @staticmethod
     def Cast(dtype, val):
         """T.Cast('float16', val) → Cast(dtype, val)."""
         if isinstance(val, int):
@@ -575,6 +1048,135 @@ class _TIRModule:
     serial = _ForKindSurface(tvm.tirx.ForKind.SERIAL)
     vectorized = _ForKindSurface(tvm.tirx.ForKind.VECTORIZED)
     grid = _GridSurface()
+
+
+# ============================================================================
+# Relax surface objects and language module
+# ============================================================================
+
+
+class _RelaxFuncSurface(SurfaceObject):
+    """Surface object for @R.function decorator."""
+
+    def __call__(self, *args, **kwargs):
+        # @R.function(private=True) → return self
+        return self
+
+    def parse_function(self, parser, node):
+        from tvm import relax
+
+        bb = relax.BlockBuilder()
+        params = []
+        for arg in node.args:
+            name = arg.lhs.name
+            ann = None
+            if arg.annotation is not None:
+                ann = parser.eval_expr(arg.annotation)
+            if isinstance(ann, relax.TensorStructInfo):
+                var = relax.Var(name, ann)
+            elif isinstance(ann, relax.StructInfo):
+                var = relax.Var(name, ann)
+            else:
+                var = relax.Var(name)
+            parser.var_table.define(name, var)
+            params.append(var)
+
+        # Parse return type annotation if present
+        ret_sinfo = None
+        if node.return_type is not None:
+            ret_sinfo = parser.eval_expr(node.return_type)
+
+        func_name = node.name.name
+
+        with bb.function(func_name, params):
+            # Parse body statements → emit bindings
+            for stmt in node.body:
+                from tvm_ffi import pyast
+
+                if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
+                    rhs_val = parser.eval_expr(stmt.rhs)
+                    name = stmt.lhs.name
+                    # Evaluate annotation for struct_info
+                    sinfo = None
+                    if stmt.annotation is not None:
+                        sinfo = parser.eval_expr(stmt.annotation)
+                    if isinstance(sinfo, relax.TensorStructInfo):
+                        var = bb.emit(rhs_val, name)
+                    else:
+                        var = bb.emit(rhs_val, name)
+                    parser.var_table.define(name, var)
+                elif isinstance(stmt, pyast.Return):
+                    if stmt.value is not None:
+                        ret_val = parser.eval_expr(stmt.value)
+                        bb.emit_func_output(ret_val)
+                # Other statement types: skip for now
+
+        mod = bb.get()
+        func = mod[func_name]
+        return func
+
+
+class _RelaxTensorSInfo:
+    """R.Tensor((3, 4), dtype='float32') → TensorStructInfo."""
+    def __call__(self, shape=None, dtype=None, ndim=-1):
+        from tvm import relax
+        if isinstance(shape, tuple):
+            shape = list(shape)
+        return relax.TensorStructInfo(shape, dtype or "float32", ndim=ndim)
+
+
+class _RelaxModule:
+    """Language module for Relax (the 'R' in `from tvm.script import relax as R`)."""
+
+    function = _RelaxFuncSurface()
+    Tensor = _RelaxTensorSInfo()
+
+    @staticmethod
+    def add(x, y):
+        from tvm.relax import op
+        return op.add(x, y)
+
+    @staticmethod
+    def prim_value(val):
+        from tvm import relax
+        return relax.PrimValue(val)
+
+    @staticmethod
+    def func_attr(attrs_dict):
+        return _FuncAttrMarker(attrs_dict)
+
+    @staticmethod
+    def Object():
+        from tvm import relax
+        return relax.ObjectStructInfo()
+
+    @staticmethod
+    def Tuple(*args):
+        from tvm import relax
+        return relax.TupleStructInfo(list(args))
+
+    @staticmethod
+    def shape(dims):
+        from tvm import relax
+        return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+
+    @staticmethod
+    def Shape(dims):
+        from tvm import relax
+        return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+
+    @staticmethod
+    def str(val):
+        return val
+
+    @staticmethod
+    def dtype(val):
+        return val
+
+    @staticmethod
+    def Prim(dtype="int64"):
+        from tvm import relax
+        return relax.PrimStructInfo(dtype)
 
 
 class _IRLangModule:
@@ -591,7 +1193,7 @@ class _IRLangModule:
 
 def make_parser() -> IRParser:
     """Create a parser configured with TIR/Relax language modules."""
-    return IRParser(lang_modules={"T": _TIRModule, "I": _IRLangModule})
+    return IRParser(lang_modules={"T": _TIRModule, "I": _IRLangModule, "R": _RelaxModule})
 
 
 def parse(text: str):
