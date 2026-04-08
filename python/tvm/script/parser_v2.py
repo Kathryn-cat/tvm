@@ -92,6 +92,7 @@ class _PrimFuncSurface(SurfaceObject):
                 parser.create_var,
                 parser.handle_return,
                 parser.handle_while,
+                parser.handle_if,
             )
             parser.make_assign = _tir_make_assign
             parser.make_store = _tir_make_store
@@ -99,6 +100,7 @@ class _PrimFuncSurface(SurfaceObject):
             parser.create_var = lambda name, ann=None: tvm.tirx.Var(name, "int32")
             parser.handle_return = _tir_handle_return
             parser.handle_while = _tir_handle_while
+            parser.handle_if = _tir_handle_if
             try:
                 body_stmts = parser.visit_body(node.body)
             finally:
@@ -109,6 +111,7 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.create_var,
                     parser.handle_return,
                     parser.handle_while,
+                    parser.handle_if,
                 ) = old
 
             # Wrap non-Stmt results (e.g. return expr) in Evaluate
@@ -230,6 +233,23 @@ class _GridSurfaceInstance(SurfaceObject):
         return body
 
 
+class _AttrSurfaceInstance(SurfaceObject):
+    """Surface object for `with T.attr(node, key, value): body` → AttrStmt."""
+
+    def __init__(self, node_val, attr_key, value):
+        self._node_val = node_val
+        self._attr_key = attr_key
+        self._value = value
+
+    def parse_with(self, parser, node):
+        body_stmts = parser.visit_body(node.body)
+        if len(body_stmts) == 1:
+            body = body_stmts[0]
+        else:
+            body = tvm.tirx.SeqStmt(body_stmts)
+        return tvm.tirx.AttrStmt(self._node_val, self._attr_key, self._value, body)
+
+
 class _ForKindSurface(SurfaceObject):
     """Surface object for T.unroll(n), T.parallel(n), T.vectorized(n), T.serial(n)."""
 
@@ -285,6 +305,24 @@ def _tir_handle_return(parser, node):
         ret_call = tvm.tirx.Call(dtype, op, [val])
         return tvm.tirx.Evaluate(ret_call)
     return None
+
+
+def _tir_handle_if(parser, node):
+    """TIR if handler: `if cond: then else: else` → IfThenElse."""
+    cond = parser.eval_expr(node.cond)
+    then_body = parser.visit_body(node.then_branch)
+    if len(then_body) == 1:
+        then_stmt = then_body[0]
+    else:
+        then_stmt = tvm.tirx.SeqStmt(then_body)
+    else_stmt = None
+    if node.else_branch and len(node.else_branch) > 0:
+        else_body = parser.visit_body(node.else_branch)
+        if len(else_body) == 1:
+            else_stmt = else_body[0]
+        else:
+            else_stmt = tvm.tirx.SeqStmt(else_body)
+    return tvm.tirx.IfThenElse(cond, then_stmt, else_stmt)
 
 
 def _tir_handle_while(parser, node):
@@ -435,12 +473,22 @@ class _DtypeHelper:
     """
     def __init__(self, dtype):
         self._dtype = dtype
-    def __call__(self, value):
-        if isinstance(value, str):
-            value = float(value) if "." in value or value in ("nan", "inf", "-inf") else int(value)
-        if "float" in self._dtype:
-            return tvm.tirx.FloatImm(self._dtype, float(value))
-        return tvm.tirx.IntImm(self._dtype, int(value))
+    def __call__(self, *args):
+        if len(args) == 1:
+            value = args[0]
+            if isinstance(value, str):
+                if value in ("nan", "inf", "-inf") or "." in value:
+                    value = float(value)
+                else:
+                    # Could be a dtype string like T.handle("int32", ...) — return self
+                    return self
+            if "float" in self._dtype:
+                return tvm.tirx.FloatImm(self._dtype, float(value))
+            if self._dtype == "handle":
+                return self  # T.handle(something) as annotation
+            return tvm.tirx.IntImm(self._dtype, int(value))
+        # Multiple args: T.handle("int32", "global") — just return self as annotation
+        return self
     def __repr__(self):
         return self._dtype
 
@@ -463,7 +511,7 @@ class _TIRModule:
     uint8 = _DtypeHelper("uint8")
     uint16 = _DtypeHelper("uint16")
     bool = _DtypeHelper("bool")
-    handle = "handle"  # type annotation: T.handle → "handle" dtype string
+    handle = _DtypeHelper("handle")  # T.handle as annotation; T.handle(...) returns Var
     Buffer = staticmethod(_tir_buffer)
 
     @staticmethod
@@ -471,6 +519,48 @@ class _TIRModule:
         """T.exp(val) → Call(tirx.exp, [val])."""
         dtype = val.dtype if hasattr(val, "dtype") else "float32"
         return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp"), [val])
+
+    @staticmethod
+    def attr(node_val, attr_key, value):
+        """T.attr(node, key, value) → _AttrSurfaceInstance for `with` dispatch."""
+        if isinstance(node_val, int):
+            node_val = tvm.tirx.IntImm("int32", node_val)
+        if isinstance(value, int):
+            value = tvm.tirx.IntImm("int32", value)
+        return _AttrSurfaceInstance(node_val, attr_key, value)
+
+    @staticmethod
+    def if_then_else(cond, then_val, else_val):
+        """T.if_then_else(cond, then, else) → Call(tirx.if_then_else, ...)."""
+        if isinstance(then_val, int):
+            then_val = tvm.tirx.IntImm("int32", then_val)
+        if isinstance(else_val, int):
+            else_val = tvm.tirx.IntImm("int32", else_val)
+        return tvm.tirx.if_then_else(cond, then_val, else_val)
+
+    @staticmethod
+    def call_extern(dtype, func_name, *args):
+        """T.call_extern('float32', 'deref', ...) → Call(call_extern, ...)."""
+        converted = []
+        for a in args:
+            if isinstance(a, int):
+                a = tvm.tirx.IntImm("int32", a)
+            elif isinstance(a, float):
+                a = tvm.tirx.FloatImm("float32", a)
+            converted.append(a)
+        return tvm.tirx.call_extern(dtype, func_name, *converted)
+
+    @staticmethod
+    def address_of(load):
+        """T.address_of(buf[i]) → call_intrin('handle', 'tirx.address_of', load)."""
+        return tvm.tirx.call_intrin("handle", "tirx.address_of", load)
+
+    @staticmethod
+    def Broadcast(value, lanes):
+        """T.Broadcast(42, 8) → Broadcast(IntImm(42), 8)."""
+        if isinstance(value, int):
+            value = tvm.tirx.IntImm("int32", value)
+        return tvm.tirx.Broadcast(value, lanes)
 
     @staticmethod
     def Cast(dtype, val):
