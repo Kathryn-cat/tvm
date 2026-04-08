@@ -463,19 +463,19 @@ class _ForKindSurface(SurfaceObject):
     def __init__(self, kind):
         self._kind = kind
 
-    def __call__(self, extent, start=None):
-        """Called as T.unroll(2) → returns instance with captured args."""
-        inst = _ForKindSurfaceInstance(self._kind, extent, start)
-        return inst
+    def __call__(self, extent, start=None, thread=None, **kwargs):
+        """Called as T.unroll(2) or T.thread_binding(4, thread='blockIdx.x')."""
+        return _ForKindSurfaceInstance(self._kind, extent, start, thread=thread)
 
 
 class _ForKindSurfaceInstance(SurfaceObject):
     """Instance created by T.unroll(2) — captures args, dispatches parse_for."""
 
-    def __init__(self, kind, extent, start=None):
+    def __init__(self, kind, extent, start=None, thread=None):
         self._kind = kind
         self._extent = extent
         self._start = start if start is not None else tvm.tirx.IntImm("int32", 0)
+        self._thread = thread
 
     def parse_for(self, parser, node):
         loop_var = tvm.tirx.Var(node.lhs.name, "int32")
@@ -495,7 +495,17 @@ class _ForKindSurfaceInstance(SurfaceObject):
             if not isinstance(self._start, int)
             else tvm.tirx.IntImm("int32", self._start)
         )
-        return tvm.tirx.For(loop_var, start, extent, int(self._kind), body)
+        # Thread binding: create IterVar with thread_tag
+        # IterVar uses a separate "iter" var, not the loop_var
+        thread_binding = None
+        if self._thread is not None:
+            iter_var = tvm.tirx.Var("iter", "int32")
+            iv = tvm.tirx.IterVar(None, iter_var, 1, self._thread)
+            thread_binding = iv
+        return tvm.tirx.For(
+            loop_var, start, extent, int(self._kind), body,
+            thread_binding=thread_binding,
+        )
 
 
 # ============================================================================
@@ -593,7 +603,7 @@ def _tir_make_assign(parser, node, rhs_val):
         buf = tvm.tirx.decl_buffer(
             buf.shape, buf.dtype, name=name,
             strides=list(buf.strides) if buf.strides else [],
-            elem_offset=buf.elem_offset if buf.elem_offset else None,
+            elem_offset=buf.elem_offset if buf.elem_offset is not None else None,
             scope=scope,
             offset_factor=buf.offset_factor,
         )
@@ -1079,6 +1089,7 @@ class _TIRModule:
     parallel = _ForKindSurface(tvm.tirx.ForKind.PARALLEL)
     serial = _ForKindSurface(tvm.tirx.ForKind.SERIAL)
     vectorized = _ForKindSurface(tvm.tirx.ForKind.VECTORIZED)
+    thread_binding = _ForKindSurface(tvm.tirx.ForKind.THREAD_BINDING)
     grid = _GridSurface()
 
 
