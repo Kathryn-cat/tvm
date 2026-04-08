@@ -80,6 +80,10 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.var_table.define(name, var)
                     params.append(var)
 
+            # Store buffer_map on parser so match_buffer can populate it
+            parser._tir_buffer_map = buffer_map
+            parser._tir_params = params
+
             # Set TIR dialect callbacks for body parsing
             old = (
                 parser.make_assign,
@@ -123,6 +127,9 @@ class _PrimFuncSurface(SurfaceObject):
                 body = tvm.tirx.SeqStmt(body_stmts)
             else:
                 body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
+
+            # Collect final buffer_map (may have been updated by match_buffer)
+            buffer_map = getattr(parser, '_tir_buffer_map', buffer_map)
 
             func_name = node.name.name
             pf = tvm.tirx.PrimFunc(params, body, buffer_map=buffer_map)
@@ -291,23 +298,44 @@ def _tir_handle_while(parser, node):
     return tvm.tirx.While(cond, body)
 
 
-def _tir_make_for(loop_var, start, end, step, body):
-    """TIR for callback: range(n) → For(serial)."""
+def _tir_make_for(parser, var_name, start, end, step, body_node):
+    """TIR for callback: range(n) → For(serial). Creates loop var and parses body."""
     if isinstance(start, int):
         start = tvm.tirx.IntImm("int32", start)
     if isinstance(end, int):
         end = tvm.tirx.IntImm("int32", end)
-    extent = end - start
-    if len(body) == 1:
-        body_stmt = body[0]
+    extent = tvm.arith.Analyzer().simplify(end - start)
+    # Create loop var with dtype matching extent
+    ext_dtype = str(extent.dtype) if hasattr(extent, "dtype") else "int32"
+    loop_var = tvm.tirx.Var(var_name, ext_dtype)
+    parser.var_table.define(var_name, loop_var)
+    # Parse body
+    body_stmts = parser.visit_body(body_node)
+    if len(body_stmts) == 1:
+        body_stmt = body_stmts[0]
     else:
-        body_stmt = tvm.tirx.SeqStmt(body)
+        body_stmt = tvm.tirx.SeqStmt(body_stmts)
     return tvm.tirx.For(loop_var, start, extent, int(tvm.tirx.ForKind.SERIAL), body_stmt)
 
 
 def _tir_make_assign(parser, node, rhs_val):
-    """TIR assign callback: handles alloc_buffer, Bind, and plain bindings."""
+    """TIR assign callback: handles alloc_buffer, match_buffer, Bind, and plain bindings."""
     name = node.lhs.name
+    if isinstance(rhs_val, _MatchBufferResult):
+        # match_buffer: add to buffer_map, define buffer in var_table
+        buf = rhs_val.buffer
+        # Set buffer name to match the LHS variable name
+        buf = tvm.tirx.decl_buffer(buf.shape, buf.dtype, name=name)
+        param_var = rhs_val.param_var
+        # Find the matching param Var and add to buffer_map
+        if hasattr(parser, '_tir_buffer_map'):
+            # Find param var by identity or name
+            for pv in getattr(parser, '_tir_params', []):
+                if pv.same_as(param_var) or (hasattr(param_var, 'name') and pv.name == param_var.name):
+                    parser._tir_buffer_map[pv] = buf
+                    break
+        parser.var_table.define(name, buf)
+        return None  # no stmt emitted — buffer_map entry only
     if isinstance(rhs_val, tuple) and len(rhs_val) == 2:
         # alloc_buffer / decl_buffer returns (buf, AllocBuffer/DeclBuffer node)
         buf, alloc_node = rhs_val
@@ -347,6 +375,22 @@ def _tir_decl_buffer(shape, dtype="float32", data=None, scope=""):
     shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
     buf = tvm.tirx.decl_buffer(shape, dtype, data=data, scope=scope)
     return buf, tvm.tirx.DeclBuffer(buf)
+
+
+class _MatchBufferResult:
+    """Marker returned by T.match_buffer for _tir_make_assign to handle."""
+    def __init__(self, param_var, buffer):
+        self.param_var = param_var
+        self.buffer = buffer
+
+
+def _tir_match_buffer(param, shape, dtype="float32"):
+    """T.match_buffer(A, (n,), 'int64') → MatchBufferResult for make_assign."""
+    if isinstance(shape, tuple):
+        shape = list(shape)
+    shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
+    buf = tvm.tirx.decl_buffer(shape, dtype)
+    return _MatchBufferResult(param, buf)
 
 
 def _tir_alloc_buffer(shape, dtype="float32", scope=""):
@@ -408,6 +452,7 @@ class _TIRModule:
     evaluate = staticmethod(_tir_evaluate)
     alloc_buffer = staticmethod(_tir_alloc_buffer)
     decl_buffer = staticmethod(_tir_decl_buffer)
+    match_buffer = staticmethod(_tir_match_buffer)
     float32 = _DtypeHelper("float32")
     float16 = _DtypeHelper("float16")
     float64 = _DtypeHelper("float64")
@@ -426,6 +471,15 @@ class _TIRModule:
         """T.exp(val) → Call(tirx.exp, [val])."""
         dtype = val.dtype if hasattr(val, "dtype") else "float32"
         return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp"), [val])
+
+    @staticmethod
+    def Cast(dtype, val):
+        """T.Cast('float16', val) → Cast(dtype, val)."""
+        if isinstance(val, int):
+            val = tvm.tirx.IntImm("int32", val)
+        elif isinstance(val, float):
+            val = tvm.tirx.FloatImm("float32", val)
+        return tvm.tirx.Cast(dtype, val)
     unroll = _ForKindSurface(tvm.tirx.ForKind.UNROLLED)
     parallel = _ForKindSurface(tvm.tirx.ForKind.PARALLEL)
     serial = _ForKindSurface(tvm.tirx.ForKind.SERIAL)
