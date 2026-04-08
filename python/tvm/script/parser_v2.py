@@ -55,6 +55,9 @@ class _PrimFuncSurface(SurfaceObject):
                 ann = None
                 if arg.annotation is not None:
                     ann = parser.eval_expr(arg.annotation)
+                # Resolve _DtypeHelper to dtype string
+                if isinstance(ann, _DtypeHelper):
+                    ann = ann._dtype
                 # If annotation is a Buffer, create handle var + buffer_map entry
                 if isinstance(ann, tvm.tirx.Buffer):
                     # Set buffer name to match param name
@@ -160,6 +163,64 @@ class _IRModuleSurface(SurfaceObject):
 # ============================================================================
 # TIR for-loop surface objects
 # ============================================================================
+
+
+class _GridSurface(SurfaceObject):
+    """Surface object for T.grid(e1, e2, ...) — sugar for nested serial For loops."""
+
+    def __call__(self, *extents):
+        return _GridSurfaceInstance(extents)
+
+
+class _GridSurfaceInstance(SurfaceObject):
+    """Instance created by T.grid(n, 10) — captures extents, expands to nested For."""
+
+    def __init__(self, extents):
+        self._extents = extents
+
+    def parse_for(self, parser, node):
+        from tvm_ffi import pyast
+
+        # Extract loop variable names from Tuple LHS
+        if isinstance(node.lhs, pyast.Tuple):
+            var_names = [v.name for v in node.lhs.values]
+        else:
+            var_names = [node.lhs.name]
+
+        if len(var_names) != len(self._extents):
+            raise ValueError(
+                f"T.grid has {len(self._extents)} extents but "
+                f"{len(var_names)} loop variables"
+            )
+
+        # Create all loop vars and define them before parsing body
+        loop_vars = []
+        for name in var_names:
+            var = tvm.tirx.Var(name, "int32")
+            parser.var_table.define(name, var)
+            loop_vars.append(var)
+
+        # Parse body (innermost)
+        body_stmts = parser.visit_body(node.body)
+        if len(body_stmts) == 1:
+            body = body_stmts[0]
+        else:
+            body = tvm.tirx.SeqStmt(body_stmts)
+
+        # Build nested For from inside out
+        for i in reversed(range(len(loop_vars))):
+            extent = self._extents[i]
+            if isinstance(extent, int):
+                extent = tvm.tirx.IntImm("int32", extent)
+            body = tvm.tirx.For(
+                loop_vars[i],
+                tvm.tirx.IntImm("int32", 0),
+                extent,
+                int(tvm.tirx.ForKind.SERIAL),
+                body,
+            )
+
+        return body
 
 
 class _ForKindSurface(SurfaceObject):
@@ -322,11 +383,22 @@ def _tir_buffer(shape, dtype="float32", scope=""):
     return tvm.tirx.decl_buffer(shape, dtype, scope=scope)
 
 
-def _tir_int32(value):
-    """T.int32 — used as type annotation or literal constructor."""
-    if isinstance(value, str):
-        return value  # type annotation: just return dtype string
-    return tvm.tirx.IntImm("int32", value)
+class _DtypeHelper:
+    """T.int32 — usable as both type annotation (bare) and literal constructor (called).
+
+    T.int32 as annotation → evaluates to this object, parser sees non-Buffer → dtype "int32"
+    T.int32(42) as call → returns IntImm("int32", 42)
+    """
+    def __init__(self, dtype):
+        self._dtype = dtype
+    def __call__(self, value):
+        if isinstance(value, str):
+            value = float(value) if "." in value or value in ("nan", "inf", "-inf") else int(value)
+        if "float" in self._dtype:
+            return tvm.tirx.FloatImm(self._dtype, float(value))
+        return tvm.tirx.IntImm(self._dtype, int(value))
+    def __repr__(self):
+        return self._dtype
 
 
 class _TIRModule:
@@ -336,9 +408,16 @@ class _TIRModule:
     evaluate = staticmethod(_tir_evaluate)
     alloc_buffer = staticmethod(_tir_alloc_buffer)
     decl_buffer = staticmethod(_tir_decl_buffer)
-    float32 = staticmethod(_tir_float32)
-    int64 = staticmethod(_tir_int64)
-    int32 = staticmethod(_tir_int32)
+    float32 = _DtypeHelper("float32")
+    float16 = _DtypeHelper("float16")
+    float64 = _DtypeHelper("float64")
+    int64 = _DtypeHelper("int64")
+    int32 = _DtypeHelper("int32")
+    int16 = _DtypeHelper("int16")
+    int8 = _DtypeHelper("int8")
+    uint8 = _DtypeHelper("uint8")
+    uint16 = _DtypeHelper("uint16")
+    bool = _DtypeHelper("bool")
     handle = "handle"  # type annotation: T.handle → "handle" dtype string
     Buffer = staticmethod(_tir_buffer)
 
@@ -351,6 +430,7 @@ class _TIRModule:
     parallel = _ForKindSurface(tvm.tirx.ForKind.PARALLEL)
     serial = _ForKindSurface(tvm.tirx.ForKind.SERIAL)
     vectorized = _ForKindSurface(tvm.tirx.ForKind.VECTORIZED)
+    grid = _GridSurface()
 
 
 class _IRLangModule:
