@@ -31,6 +31,40 @@ from tvm_ffi.pyast_parser import IRParser, SurfaceObject
 # ============================================================================
 
 
+def _wrap_body_stmts(body_stmts):
+    """Wrap non-Stmt items in Evaluate, filter None, return single Stmt or SeqStmt."""
+    wrapped = []
+    for s in body_stmts:
+        if s is None:
+            continue
+        if isinstance(s, tvm.tirx.Stmt):
+            wrapped.append(s)
+        else:
+            wrapped.append(tvm.tirx.Evaluate(s))
+    if len(wrapped) == 1:
+        return wrapped[0]
+    if len(wrapped) == 0:
+        return tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
+    return tvm.tirx.SeqStmt(wrapped)
+
+
+def _has_sblock_recursive(obj):
+    """Check if obj or any nested child contains a SBlockRealize."""
+    if isinstance(obj, tvm.tirx.SBlockRealize):
+        return True
+    if isinstance(obj, tvm.tirx.For):
+        return _has_sblock_recursive(obj.body)
+    if isinstance(obj, tvm.tirx.SeqStmt):
+        return any(_has_sblock_recursive(s) for s in obj.seq)
+    if isinstance(obj, tvm.tirx.AttrStmt):
+        return _has_sblock_recursive(obj.body)
+    if isinstance(obj, tvm.tirx.IfThenElse):
+        return _has_sblock_recursive(obj.then_case) or (
+            obj.else_case is not None and _has_sblock_recursive(obj.else_case)
+        )
+    return False
+
+
 class _PrimFuncSurface(SurfaceObject):
     """Surface object for @T.prim_func decorator.
 
@@ -143,10 +177,7 @@ class _PrimFuncSurface(SurfaceObject):
                 body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
 
             # Wrap in root SBlockRealize if needed
-            has_sblocks = any(
-                isinstance(s, tvm.tirx.SBlockRealize)
-                for s in (body_stmts if len(body_stmts) > 1 else [body])
-            ) or root_alloc_bufs
+            has_sblocks = _has_sblock_recursive(body) or root_alloc_bufs
             if has_sblocks:
                 root_sb = tvm.tirx.SBlock(
                     [], [], [], "root", body, init=None,
@@ -240,10 +271,7 @@ class _GridSurfaceInstance(SurfaceObject):
 
         # Parse body (innermost)
         body_stmts = parser.visit_body(node.body)
-        if len(body_stmts) == 1:
-            body = body_stmts[0]
-        else:
-            body = tvm.tirx.SeqStmt(body_stmts)
+        body = _wrap_body_stmts(body_stmts)
 
         # Build nested For from inside out
         for i in reversed(range(len(loop_vars))):
@@ -402,12 +430,7 @@ class _SBlockSurfaceInstance(SurfaceObject):
             tir_iter_values.append(ab.value)
 
         # Build body
-        if len(real_body) == 1:
-            body = real_body[0]
-        elif len(real_body) > 1:
-            body = tvm.tirx.SeqStmt(real_body)
-        else:
-            body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
+        body = _wrap_body_stmts(real_body)
 
         # Convert reads/writes to BufferRegion lists
         tir_reads = _to_buffer_regions(reads)
@@ -537,10 +560,7 @@ class _ForKindSurfaceInstance(SurfaceObject):
         loop_var = tvm.tirx.Var(node.lhs.name, "int32")
         parser.var_table.define(node.lhs.name, loop_var)
         body_stmts = parser.visit_body(node.body)
-        if len(body_stmts) == 1:
-            body = body_stmts[0]
-        else:
-            body = tvm.tirx.SeqStmt(body_stmts)
+        body = _wrap_body_stmts(body_stmts)
         extent = (
             self._extent
             if not isinstance(self._extent, int)
@@ -583,30 +603,17 @@ def _tir_handle_return(parser, node):
 def _tir_handle_if(parser, node):
     """TIR if handler: `if cond: then else: else` → IfThenElse."""
     cond = parser.eval_expr(node.cond)
-    then_body = parser.visit_body(node.then_branch)
-    if len(then_body) == 1:
-        then_stmt = then_body[0]
-    else:
-        then_stmt = tvm.tirx.SeqStmt(then_body)
+    then_stmt = _wrap_body_stmts(parser.visit_body(node.then_branch))
     else_stmt = None
     if node.else_branch and len(node.else_branch) > 0:
-        else_body = parser.visit_body(node.else_branch)
-        if len(else_body) == 1:
-            else_stmt = else_body[0]
-        else:
-            else_stmt = tvm.tirx.SeqStmt(else_body)
+        else_stmt = _wrap_body_stmts(parser.visit_body(node.else_branch))
     return tvm.tirx.IfThenElse(cond, then_stmt, else_stmt)
 
 
 def _tir_handle_while(parser, node):
     """TIR while handler: `while cond: body` → While(cond, body)."""
     cond = parser.eval_expr(node.cond)
-    body_stmts = parser.visit_body(node.body)
-    if len(body_stmts) == 1:
-        body = body_stmts[0]
-    else:
-        body = tvm.tirx.SeqStmt(body_stmts)
-    return tvm.tirx.While(cond, body)
+    return tvm.tirx.While(cond, _wrap_body_stmts(parser.visit_body(node.body)))
 
 
 def _tir_make_for(parser, var_name, start, end, step, body_node):
@@ -616,16 +623,11 @@ def _tir_make_for(parser, var_name, start, end, step, body_node):
     if isinstance(end, int):
         end = tvm.tirx.IntImm("int32", end)
     extent = tvm.arith.Analyzer().simplify(end - start)
-    # Create loop var with dtype matching extent
     ext_dtype = str(extent.dtype) if hasattr(extent, "dtype") else "int32"
     loop_var = tvm.tirx.Var(var_name, ext_dtype)
     parser.var_table.define(var_name, loop_var)
-    # Parse body
     body_stmts = parser.visit_body(body_node)
-    if len(body_stmts) == 1:
-        body_stmt = body_stmts[0]
-    else:
-        body_stmt = tvm.tirx.SeqStmt(body_stmts)
+    body_stmt = _wrap_body_stmts(body_stmts)
     return tvm.tirx.For(loop_var, start, extent, int(tvm.tirx.ForKind.SERIAL), body_stmt)
 
 
@@ -718,7 +720,6 @@ def _tir_make_store(target, value, indices):
                 lanes = stop - (i.start if i.start is not None else 0)
             else:
                 lanes = tvm.arith.Analyzer().simplify(stop - start)
-                lanes = int(lanes) if hasattr(lanes, 'value') else int(lanes)
             converted.append(tvm.tirx.Ramp(start, tvm.tirx.IntImm("int32", 1), lanes))
         else:
             converted.append(i)
@@ -873,12 +874,20 @@ class _TIRModule:
     axis = _AxisModule
 
     @staticmethod
-    def sblock_alloc_buffer(shape, dtype="float32", scope=""):
-        """T.sblock_alloc_buffer(shape) → marker for root sblock."""
+    def sblock_alloc_buffer(shape, dtype="float32", scope="", strides=None,
+                            offset_factor=0, elem_offset=None, **kwargs):
+        """T.sblock_alloc_buffer(shape, ...) → marker for root sblock."""
         if isinstance(shape, tuple):
             shape = list(shape)
         shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
-        buf = tvm.tirx.decl_buffer(shape, dtype, scope=scope)
+        if strides is not None and isinstance(strides, (list, tuple)):
+            strides = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in strides]
+        buf = tvm.tirx.decl_buffer(
+            shape, dtype, scope=scope,
+            strides=strides or [],
+            elem_offset=elem_offset if elem_offset is not None else None,
+            offset_factor=offset_factor,
+        )
         return _SBlockAllocBufferMarker(buf, tvm.tirx.AllocBuffer(buf, {}))
 
     @staticmethod
