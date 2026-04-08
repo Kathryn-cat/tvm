@@ -84,12 +84,14 @@ class _PrimFuncSurface(SurfaceObject):
                 parser.make_for,
                 parser.create_var,
                 parser.handle_return,
+                parser.handle_while,
             )
             parser.make_assign = _tir_make_assign
             parser.make_store = _tir_make_store
             parser.make_for = _tir_make_for
             parser.create_var = lambda name, ann=None: tvm.tirx.Var(name, "int32")
             parser.handle_return = _tir_handle_return
+            parser.handle_while = _tir_handle_while
             try:
                 body_stmts = parser.visit_body(node.body)
             finally:
@@ -99,6 +101,7 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.make_for,
                     parser.create_var,
                     parser.handle_return,
+                    parser.handle_while,
                 ) = old
 
             # Wrap non-Stmt results (e.g. return expr) in Evaluate
@@ -216,6 +219,17 @@ def _tir_handle_return(parser, node):
     return None
 
 
+def _tir_handle_while(parser, node):
+    """TIR while handler: `while cond: body` → While(cond, body)."""
+    cond = parser.eval_expr(node.cond)
+    body_stmts = parser.visit_body(node.body)
+    if len(body_stmts) == 1:
+        body = body_stmts[0]
+    else:
+        body = tvm.tirx.SeqStmt(body_stmts)
+    return tvm.tirx.While(cond, body)
+
+
 def _tir_make_for(loop_var, start, end, step, body):
     """TIR for callback: range(n) → For(serial)."""
     if isinstance(start, int):
@@ -231,15 +245,20 @@ def _tir_make_for(loop_var, start, end, step, body):
 
 
 def _tir_make_assign(parser, node, rhs_val):
-    """TIR assign callback: handles alloc_buffer tuple returns."""
+    """TIR assign callback: handles alloc_buffer, Bind, and plain bindings."""
     name = node.lhs.name
     if isinstance(rhs_val, tuple) and len(rhs_val) == 2:
-        # alloc_buffer returns (buf, AllocBuffer node)
+        # alloc_buffer / decl_buffer returns (buf, AllocBuffer/DeclBuffer node)
         buf, alloc_node = rhs_val
         parser.var_table.define(name, buf)
         return alloc_node
+    # If RHS is a PrimExpr (not a Stmt), create a Bind node
+    if isinstance(rhs_val, tvm.tirx.PrimExpr):
+        var = tvm.tirx.Var(name, rhs_val.dtype)
+        parser.var_table.define(name, var)
+        return tvm.tirx.Bind(var, rhs_val)
     parser.var_table.define(name, rhs_val)
-    return rhs_val
+    return None  # plain binding, no stmt emitted
 
 
 def _tir_make_store(target, value, indices):
@@ -258,6 +277,15 @@ def _tir_evaluate(value):
     if isinstance(value, int):
         return tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", value))
     return tvm.tirx.Evaluate(value)
+
+
+def _tir_decl_buffer(shape, dtype="float32", data=None, scope=""):
+    """T.decl_buffer(shape, dtype, data=...) → (Buffer, DeclBuffer node)."""
+    if isinstance(shape, tuple):
+        shape = list(shape)
+    shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
+    buf = tvm.tirx.decl_buffer(shape, dtype, data=data, scope=scope)
+    return buf, tvm.tirx.DeclBuffer(buf)
 
 
 def _tir_alloc_buffer(shape, dtype="float32", scope=""):
@@ -307,11 +335,18 @@ class _TIRModule:
     prim_func = _PrimFuncSurface()
     evaluate = staticmethod(_tir_evaluate)
     alloc_buffer = staticmethod(_tir_alloc_buffer)
+    decl_buffer = staticmethod(_tir_decl_buffer)
     float32 = staticmethod(_tir_float32)
     int64 = staticmethod(_tir_int64)
     int32 = staticmethod(_tir_int32)
     handle = "handle"  # type annotation: T.handle → "handle" dtype string
     Buffer = staticmethod(_tir_buffer)
+
+    @staticmethod
+    def exp(val):
+        """T.exp(val) → Call(tirx.exp, [val])."""
+        dtype = val.dtype if hasattr(val, "dtype") else "float32"
+        return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp"), [val])
     unroll = _ForKindSurface(tvm.tirx.ForKind.UNROLLED)
     parallel = _ForKindSurface(tvm.tirx.ForKind.PARALLEL)
     serial = _ForKindSurface(tvm.tirx.ForKind.SERIAL)
