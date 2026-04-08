@@ -330,19 +330,19 @@ class _AxisModule:
     def reduce(extent, value):
         if isinstance(extent, int):
             extent = tvm.tirx.IntImm("int32", extent)
-        return _AxisBinding(extent, value, 1)
+        return _AxisBinding(extent, value, 2)  # kCommReduce = 2
 
     @staticmethod
     def scan(extent, value):
         if isinstance(extent, int):
             extent = tvm.tirx.IntImm("int32", extent)
-        return _AxisBinding(extent, value, 2)
+        return _AxisBinding(extent, value, 3)  # kOrdered = 3
 
     @staticmethod
     def opaque(extent, value):
         if isinstance(extent, int):
             extent = tvm.tirx.IntImm("int32", extent)
-        return _AxisBinding(extent, value, 3)
+        return _AxisBinding(extent, value, 4)  # kOpaque = 4
 
 
 class _SBlockSurface(SurfaceObject):
@@ -438,6 +438,62 @@ def _to_buffer_regions(regions):
                 ranges.append(tvm.ir.Range.from_min_extent(idx, tvm.tirx.IntImm("int32", 1)))
             result.append(tvm.tirx.BufferRegion(r.buffer, ranges))
     return result
+
+
+class _LaunchThreadSurface(SurfaceObject):
+    """T.launch_thread("blockIdx.x", 128) → surface object for with-stmt."""
+
+    def __call__(self, thread_tag_or_var, extent):
+        return _LaunchThreadInstance(thread_tag_or_var, extent)
+
+
+class _LaunchThreadInstance(SurfaceObject):
+    """Instance for `with T.launch_thread("blockIdx.x", 128) as i:`."""
+
+    def __init__(self, thread_tag_or_var, extent):
+        self._thread_tag_or_var = thread_tag_or_var
+        self._extent = extent if not isinstance(extent, int) else tvm.tirx.IntImm("int32", extent)
+
+    def parse_with(self, parser, node):
+        # Determine thread_tag and whether var was already defined
+        thread_tag = self._thread_tag_or_var
+        already_defined_var = None
+        if isinstance(thread_tag, tvm.tirx.Var):
+            # T.launch_thread(existing_var, extent) — var already in scope
+            already_defined_var = thread_tag
+            # Look up the IterVar's thread_tag from the var
+            # For now, use a generic tag
+            thread_tag = "unknown"
+        elif not isinstance(thread_tag, str):
+            thread_tag = str(thread_tag)
+
+        if already_defined_var is not None:
+            # Var already defined: no `as` clause
+            iv = tvm.tirx.IterVar(
+                tvm.ir.Range(tvm.tirx.IntImm("int32", 0), self._extent),
+                already_defined_var, 1, thread_tag,
+            )
+            body_stmts = parser.visit_body(node.body)
+            if len(body_stmts) == 1:
+                body = body_stmts[0]
+            else:
+                body = tvm.tirx.SeqStmt(body_stmts)
+            return tvm.tirx.AttrStmt(iv, "thread_extent", self._extent, body)
+        else:
+            # New var from `as` clause
+            var_name = node.lhs.name if node.lhs is not None else "v"
+            var = tvm.tirx.Var(var_name, "int32")
+            parser.var_table.define(var_name, var)
+            iv = tvm.tirx.IterVar(
+                tvm.ir.Range(tvm.tirx.IntImm("int32", 0), self._extent),
+                var, 1, thread_tag,
+            )
+            body_stmts = parser.visit_body(node.body)
+            if len(body_stmts) == 1:
+                body = body_stmts[0]
+            else:
+                body = tvm.tirx.SeqStmt(body_stmts)
+            return tvm.tirx.AttrStmt(iv, "thread_extent", self._extent, body)
 
 
 class _AttrSurfaceInstance(SurfaceObject):
@@ -813,6 +869,7 @@ class _TIRModule:
 
     sblock = _SBlockSurface()
     init = _InitSurface()
+    launch_thread = _LaunchThreadSurface()
     axis = _AxisModule
 
     @staticmethod
@@ -1064,6 +1121,38 @@ class _TIRModule:
     @staticmethod
     def likely(cond):
         return tvm.tirx.call_intrin("bool", "tirx.likely", cond)
+
+    # GPU / hardware intrinsics — pass through to tvm.tirx.*
+    tvm_load_matrix_sync = staticmethod(lambda *args: tvm.tirx.tvm_load_matrix_sync(*args))
+    tvm_store_matrix_sync = staticmethod(lambda *args: tvm.tirx.tvm_store_matrix_sync(*args))
+    tvm_mma_sync = staticmethod(lambda *args: tvm.tirx.tvm_mma_sync(*args))
+    tvm_fill_fragment = staticmethod(lambda *args: tvm.tirx.tvm_fill_fragment(*args))
+    tvm_access_ptr = staticmethod(lambda *args: tvm.tirx.tvm_access_ptr(*args))
+    tvm_tuple = staticmethod(lambda *args: tvm.tirx.tvm_tuple(*args))
+    tvm_struct_get = staticmethod(lambda *args: tvm.tirx.tvm_struct_get(*args))
+    tvm_struct_set = staticmethod(lambda *args: tvm.tirx.tvm_struct_set(*args))
+    ptx_ldmatrix = staticmethod(lambda *args: tvm.tirx.ptx_ldmatrix(*args))
+    ptx_mma = staticmethod(lambda *args: tvm.tirx.ptx_mma(*args))
+    ptx_cp_async = staticmethod(lambda *args: tvm.tirx.ptx_cp_async(*args))
+    ptx_commit_group = staticmethod(lambda *args: tvm.tirx.ptx_commit_group(*args))
+    ptx_wait_group = staticmethod(lambda *args: tvm.tirx.ptx_wait_group(*args))
+    mma_store = staticmethod(lambda *args: tvm.tirx.mma_store(*args))
+    mma_fill = staticmethod(lambda *args: tvm.tirx.mma_fill(*args))
+    call_llvm_pure_intrin = staticmethod(lambda *args: tvm.tirx.call_llvm_pure_intrin(*args))
+    call_llvm_intrin = staticmethod(lambda *args: tvm.tirx.call_llvm_intrin(*args))
+    vectorcombine = staticmethod(lambda *args: tvm.tirx.vectorcombine(*args))
+    vectorhigh = staticmethod(lambda *args: tvm.tirx.vectorhigh(*args))
+    vectorlow = staticmethod(lambda *args: tvm.tirx.vectorlow(*args))
+    uint32 = _DtypeHelper("uint32")
+    tvm_static_handle = staticmethod(lambda: tvm.tirx.call_intrin("handle", "tirx.tvm_static_handle"))
+    type_annotation = staticmethod(lambda *args: tvm.tirx.type_annotation(*args))
+    tvm_stack_make_array = staticmethod(lambda *args: tvm.tirx.tvm_stack_make_array(*args))
+    tvm_stack_make_shape = staticmethod(lambda *args: tvm.tirx.tvm_stack_make_shape(*args))
+    tvm_stack_alloca = staticmethod(lambda *args: tvm.tirx.tvm_stack_alloca(*args))
+    simdgroup_load = staticmethod(lambda *args: tvm.tirx.simdgroup_load(*args))
+    simdgroup_store = staticmethod(lambda *args: tvm.tirx.simdgroup_store(*args))
+    simdgroup_multiply_accumulate = staticmethod(lambda *args: tvm.tirx.simdgroup_multiply_accumulate(*args))
+    get_active_lane_mask = staticmethod(lambda *args: tvm.tirx.get_active_lane_mask(*args))
 
     @staticmethod
     def comm_reducer(combiner_fn, identity):
