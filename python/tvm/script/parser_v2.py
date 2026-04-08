@@ -435,7 +435,7 @@ def _to_buffer_regions(regions):
             # buf[vi, vj] → BufferRegion with point ranges
             ranges = []
             for idx in r.indices:
-                ranges.append(tvm.ir.Range(idx, tvm.tirx.IntImm("int32", 1)))
+                ranges.append(tvm.ir.Range.from_min_extent(idx, tvm.tirx.IntImm("int32", 1)))
             result.append(tvm.tirx.BufferRegion(r.buffer, ranges))
     return result
 
