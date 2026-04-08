@@ -36,7 +36,7 @@ class _PrimFuncSurface(SurfaceObject):
 
     def parse_function(self, parser, node):
         with parser.var_table.frame():
-            # Parse params (none in simplest case)
+            # Parse params
             params = []
             for arg in node.args:
                 name = arg.lhs.name
@@ -63,6 +63,35 @@ class _PrimFuncSurface(SurfaceObject):
 
 
 # ============================================================================
+# IR surface objects
+# ============================================================================
+
+
+class _IRModuleSurface(SurfaceObject):
+    """Surface object for @I.ir_module decorator."""
+
+    def parse_class(self, parser, node):
+        with parser.var_table.frame():
+            # Pass 1: forward-declare all function GlobalVars
+            for stmt in node.body:
+                from tvm_ffi import pyast
+
+                if isinstance(stmt, pyast.Function):
+                    gv = tvm.ir.GlobalVar(stmt.name.name)
+                    parser.var_table.define(stmt.name.name, gv)
+
+            # Pass 2: parse function bodies
+            funcs = {}
+            for stmt in node.body:
+                func_ir = parser.visit_stmt(stmt)
+                func_name = stmt.name.name
+                gv = parser.var_table.get(func_name)
+                funcs[gv] = func_ir
+
+            return tvm.ir.IRModule(funcs)
+
+
+# ============================================================================
 # TIR language module callables
 # ============================================================================
 
@@ -75,7 +104,7 @@ def _tir_evaluate(value):
 
 
 # ============================================================================
-# Language module: T
+# Language modules
 # ============================================================================
 
 
@@ -86,6 +115,13 @@ class _TIRModule:
     evaluate = staticmethod(_tir_evaluate)
 
 
+class _IRLangModule:
+    """Language module for IR (the 'I' in `from tvm.script import ir as I`)."""
+
+    ir_module = _IRModuleSurface()
+    GlobalVar = staticmethod(tvm.ir.GlobalVar)
+
+
 # ============================================================================
 # Public API
 # ============================================================================
@@ -93,7 +129,7 @@ class _TIRModule:
 
 def make_parser() -> IRParser:
     """Create a parser configured with TIR/Relax language modules."""
-    return IRParser(lang_modules={"T": _TIRModule})
+    return IRParser(lang_modules={"T": _TIRModule, "I": _IRLangModule})
 
 
 def parse(text: str):
