@@ -273,6 +273,25 @@ class _SBlockAllocBufferMarker:
         self.alloc_node = alloc_node
 
 
+class _InitMarker:
+    """Marker for `with T.init(): body` — collected by sblock."""
+    def __init__(self, body):
+        self.body = body
+
+
+class _InitSurface(SurfaceObject):
+    """Surface object for `with T.init(): body`."""
+    def __call__(self):
+        return self
+    def parse_with(self, parser, node):
+        body_stmts = parser.visit_body(node.body)
+        if len(body_stmts) == 1:
+            body = body_stmts[0]
+        else:
+            body = tvm.tirx.SeqStmt(body_stmts)
+        return _InitMarker(body)
+
+
 class _SBlockAttrMarker:
     """Marker for T.sblock_attr({...}) — collected by sblock surface."""
     def __init__(self, attrs):
@@ -350,6 +369,7 @@ class _SBlockSurfaceInstance(SurfaceObject):
         writes = []
         annotations = {}
         alloc_buffers = []
+        init_body = None
         real_body = []
 
         for s in body_stmts:
@@ -364,6 +384,8 @@ class _SBlockSurfaceInstance(SurfaceObject):
                 writes = s.regions
             elif isinstance(s, _SBlockAttrMarker):
                 annotations.update(s.attrs)
+            elif isinstance(s, _InitMarker):
+                init_body = s.body
             elif isinstance(s, _SBlockAllocBufferMarker):
                 alloc_buffers.append(s.buf)
             elif isinstance(s, tvm.tirx.Stmt):
@@ -393,7 +415,7 @@ class _SBlockSurfaceInstance(SurfaceObject):
 
         sb = tvm.tirx.SBlock(
             tir_iter_vars, tir_reads, tir_writes,
-            self._name, body, init=None,
+            self._name, body, init=init_body,
             alloc_buffers=alloc_buffers, match_buffers=[],
             annotations=annotations,
         )
@@ -621,16 +643,17 @@ def _tir_make_store(target, value, indices):
         if isinstance(i, int):
             converted.append(tvm.tirx.IntImm("int32", i))
         elif isinstance(i, slice):
-            # slice(0, 8) → Ramp(0, 1, lanes=8-0)
-            start = i.start or 0
+            # slice(start, stop) → Ramp(start, 1, lanes=stop-start)
+            start = i.start if i.start is not None else 0
             stop = i.stop
             if isinstance(start, int):
                 start = tvm.tirx.IntImm("int32", start)
-            if isinstance(stop, int):
-                lanes = i.stop - (i.start or 0)
+            if isinstance(stop, int) and isinstance(i.start, (int, type(None))):
+                lanes = stop - (i.start if i.start is not None else 0)
             else:
-                lanes = stop - start
-            converted.append(tvm.tirx.Ramp(start, tvm.tirx.IntImm("int32", 1), int(lanes)))
+                lanes = tvm.arith.Analyzer().simplify(stop - start)
+                lanes = int(lanes) if hasattr(lanes, 'value') else int(lanes)
+            converted.append(tvm.tirx.Ramp(start, tvm.tirx.IntImm("int32", 1), lanes))
         else:
             converted.append(i)
     return tvm.tirx.BufferStore(target, value, converted)
@@ -779,6 +802,7 @@ class _TIRModule:
     Buffer = staticmethod(_tir_buffer)
 
     sblock = _SBlockSurface()
+    init = _InitSurface()
     axis = _AxisModule
 
     @staticmethod
@@ -888,8 +912,15 @@ class _TIRModule:
         return tvm.tirx.Select(cond, true_val, false_val)
 
     @staticmethod
-    def where(cond, true_val, false_val):
-        return tvm.tirx.Select(cond, true_val, false_val)
+    def where(cond, true_val=None, false_val=None):
+        if true_val is not None and false_val is not None:
+            return tvm.tirx.Select(cond, true_val, false_val)
+        # T.where(cond) with one arg — just the condition
+        return cond
+
+    And = staticmethod(lambda a, b: tvm.tirx.And(a, b))
+    Or = staticmethod(lambda a, b: tvm.tirx.Or(a, b))
+    Not = staticmethod(lambda a: tvm.tirx.Not(a))
 
     @staticmethod
     def assume(cond):
@@ -923,8 +954,9 @@ class _TIRModule:
         return tvm.tirx.call_intrin(dtype, intrin_name, *args)
 
     @staticmethod
-    def target(key):
-        return tvm.tirx.call_intrin("bool", "tirx.target", key)
+    def target(config_dict):
+        """T.target({...}) → Target object."""
+        return tvm.target.Target(config_dict)
 
     @staticmethod
     def reinterpret(dtype, val):
