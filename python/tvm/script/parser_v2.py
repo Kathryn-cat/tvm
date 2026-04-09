@@ -39,8 +39,18 @@ def _wrap_body_stmts(body_stmts):
             continue
         if isinstance(s, tvm.tirx.Stmt):
             wrapped.append(s)
-        else:
+        elif isinstance(s, tvm.tirx.PrimExpr):
             wrapped.append(tvm.tirx.Evaluate(s))
+        else:
+            # Non-TIR expr (e.g. relax.Call from GlobalVar call) — wrap as tir Call
+            try:
+                if hasattr(s, "op") and hasattr(s, "args"):
+                    tir_call = tvm.tirx.Call("", s.op, list(s.args))
+                    wrapped.append(tvm.tirx.Evaluate(tir_call))
+                else:
+                    wrapped.append(tvm.tirx.Evaluate(s))
+            except Exception:
+                wrapped.append(tvm.tirx.Evaluate(s))
     if len(wrapped) == 1:
         return wrapped[0]
     if len(wrapped) == 0:
@@ -167,8 +177,18 @@ class _PrimFuncSurface(SurfaceObject):
                     root_alloc_bufs.append(s.buf)
                 elif isinstance(s, tvm.tirx.Stmt):
                     wrapped.append(s)
-                elif s is not None:
+                elif isinstance(s, tvm.tirx.PrimExpr):
                     wrapped.append(tvm.tirx.Evaluate(s))
+                elif s is not None:
+                    # Non-TIR expr (e.g. relax.Call from GlobalVar call)
+                    try:
+                        if hasattr(s, "op") and hasattr(s, "args"):
+                            tir_call = tvm.tirx.Call("", s.op, list(s.args))
+                            wrapped.append(tvm.tirx.Evaluate(tir_call))
+                        else:
+                            wrapped.append(tvm.tirx.Evaluate(s))
+                    except Exception:
+                        pass  # skip non-evaluatable items
             body_stmts = wrapped
 
             # Construct body
@@ -179,8 +199,9 @@ class _PrimFuncSurface(SurfaceObject):
             else:
                 body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
 
-            # Wrap in root SBlockRealize if needed
-            has_sblocks = _has_sblock_recursive(body) or root_alloc_bufs
+            # Wrap in root SBlockRealize if needed (but not if body is already one)
+            body_is_sblock = isinstance(body, tvm.tirx.SBlockRealize)
+            has_sblocks = (_has_sblock_recursive(body) or root_alloc_bufs) and not body_is_sblock
             if has_sblocks:
                 root_sb = tvm.tirx.SBlock(
                     [], [], [], "root", body, init=None,
@@ -247,6 +268,9 @@ class _IRModuleSurface(SurfaceObject):
             # Pass 2: parse function bodies
             funcs = {}
             for stmt in node.body:
+                from tvm_ffi import pyast
+                if not isinstance(stmt, pyast.Function):
+                    continue  # skip pass, expr stmts, etc.
                 func_ir = parser.visit_stmt(stmt)
                 func_name = stmt.name.name
                 gv = gv_map[func_name]
@@ -288,12 +312,18 @@ class _GridSurfaceInstance(SurfaceObject):
                 f"{len(var_names)} loop variables"
             )
 
-        # Create all loop vars and define them before parsing body
+        # Normalize extents and create loop vars with matching dtypes
+        extents = []
         loop_vars = []
-        for name in var_names:
-            var = tvm.tirx.Var(name, "int32")
+        for i, name in enumerate(var_names):
+            ext = self._extents[i]
+            if isinstance(ext, int):
+                ext = tvm.tirx.IntImm("int32", ext)
+            ext_dtype = str(ext.dtype) if hasattr(ext, "dtype") else "int32"
+            var = tvm.tirx.Var(name, ext_dtype)
             parser.var_table.define(name, var)
             loop_vars.append(var)
+            extents.append(ext)
 
         # Parse body (innermost)
         body_stmts = parser.visit_body(node.body)
@@ -301,12 +331,11 @@ class _GridSurfaceInstance(SurfaceObject):
 
         # Build nested For from inside out
         for i in reversed(range(len(loop_vars))):
-            extent = self._extents[i]
-            if isinstance(extent, int):
-                extent = tvm.tirx.IntImm("int32", extent)
+            extent = extents[i]
+            ext_dtype = str(extent.dtype) if hasattr(extent, "dtype") else "int32"
             body = tvm.tirx.For(
                 loop_vars[i],
-                tvm.tirx.IntImm("int32", 0),
+                tvm.tirx.IntImm(ext_dtype, 0),
                 extent,
                 int(tvm.tirx.ForKind.SERIAL),
                 body,
@@ -685,13 +714,19 @@ def _tir_make_for(parser, var_name, start, end, step, body_node):
         start = tvm.tirx.IntImm("int32", start)
     if isinstance(end, int):
         end = tvm.tirx.IntImm("int32", end)
+    if isinstance(step, int):
+        step = tvm.tirx.IntImm("int32", step)
     extent = tvm.arith.Analyzer().simplify(end - start)
     ext_dtype = str(extent.dtype) if hasattr(extent, "dtype") else "int32"
     loop_var = tvm.tirx.Var(var_name, ext_dtype)
     parser.var_table.define(var_name, loop_var)
     body_stmts = parser.visit_body(body_node)
     body_stmt = _wrap_body_stmts(body_stmts)
-    return tvm.tirx.For(loop_var, start, extent, int(tvm.tirx.ForKind.SERIAL), body_stmt)
+    # Only pass step if it's not trivially 1
+    step_val = step
+    if isinstance(step, tvm.tirx.IntImm) and step.value == 1:
+        step_val = None
+    return tvm.tirx.For(loop_var, start, extent, int(tvm.tirx.ForKind.SERIAL), body_stmt, step=step_val)
 
 
 def _tir_make_assign(parser, node, rhs_val):
@@ -746,6 +781,11 @@ def _tir_make_assign(parser, node, rhs_val):
         buf, alloc_node = rhs_val
         parser.var_table.define(name, buf)
         return alloc_node
+    # Convert raw Python int/float to IntImm/FloatImm
+    if isinstance(rhs_val, int):
+        rhs_val = tvm.tirx.IntImm("int32", rhs_val)
+    elif isinstance(rhs_val, float):
+        rhs_val = tvm.tirx.FloatImm("float32", rhs_val)
     # If RHS is a PrimExpr (not a Stmt), create a Bind node
     if isinstance(rhs_val, tvm.tirx.PrimExpr):
         # Check for type annotation on the AST node
@@ -937,8 +977,22 @@ class _TIRModule:
     int8 = _DtypeHelper("int8")
     uint8 = _DtypeHelper("uint8")
     uint16 = _DtypeHelper("uint16")
+    uint64 = _DtypeHelper("uint64")
     bool = _DtypeHelper("bool")
     handle = _DtypeHelper("handle")  # T.handle as annotation; T.handle(...) returns Var
+    # Exotic dtypes
+    float8_e3m4 = _DtypeHelper("float8_e3m4")
+    float8_e4m3 = _DtypeHelper("float8_e4m3")
+    float8_e4m3b11fnuz = _DtypeHelper("float8_e4m3b11fnuz")
+    float8_e4m3fn = _DtypeHelper("float8_e4m3fn")
+    float8_e4m3fnuz = _DtypeHelper("float8_e4m3fnuz")
+    float8_e5m2 = _DtypeHelper("float8_e5m2")
+    float8_e5m2fnuz = _DtypeHelper("float8_e5m2fnuz")
+    float8_e8m0fnu = _DtypeHelper("float8_e8m0fnu")
+    float6_e2m3fn = _DtypeHelper("float6_e2m3fn")
+    float6_e3m2fn = _DtypeHelper("float6_e3m2fn")
+    float4_e2m1fn = _DtypeHelper("float4_e2m1fn")
+    bfloat16 = _DtypeHelper("bfloat16")
     Buffer = staticmethod(_tir_buffer)
 
     sblock = _SBlockSurface()
@@ -1159,7 +1213,7 @@ class _TIRModule:
 
     @staticmethod
     def log2(val):
-        return tvm.tirx.log(val) / tvm.tirx.log(tvm.tirx.FloatImm("float32", 2.0))
+        return tvm.tirx.log2(val)
 
     @staticmethod
     def sigmoid(val):
@@ -1176,6 +1230,141 @@ class _TIRModule:
     @staticmethod
     def popcount(val):
         return tvm.tirx.popcount(val)
+
+    # --- Additional math functions ---
+    @staticmethod
+    def exp2(val):
+        return tvm.tirx.exp2(val)
+
+    @staticmethod
+    def exp10(val):
+        dtype = val.dtype if hasattr(val, "dtype") else "float32"
+        return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp10"), [val])
+
+    @staticmethod
+    def erf(val):
+        return tvm.tirx.erf(val)
+
+    @staticmethod
+    def sin(val):
+        return tvm.tirx.sin(val)
+
+    @staticmethod
+    def cos(val):
+        return tvm.tirx.cos(val)
+
+    @staticmethod
+    def tan(val):
+        return tvm.tirx.tan(val)
+
+    @staticmethod
+    def asin(val):
+        return tvm.tirx.asin(val)
+
+    @staticmethod
+    def acos(val):
+        return tvm.tirx.acos(val)
+
+    @staticmethod
+    def atan(val):
+        return tvm.tirx.atan(val)
+
+    @staticmethod
+    def sinh(val):
+        return tvm.tirx.sinh(val)
+
+    @staticmethod
+    def cosh(val):
+        return tvm.tirx.cosh(val)
+
+    @staticmethod
+    def asinh(val):
+        return tvm.tirx.asinh(val)
+
+    @staticmethod
+    def acosh(val):
+        return tvm.tirx.acosh(val)
+
+    @staticmethod
+    def atanh(val):
+        return tvm.tirx.atanh(val)
+
+    @staticmethod
+    def atan2(x1, x2):
+        return tvm.tirx.atan2(x1, x2)
+
+    @staticmethod
+    def log1p(val):
+        return tvm.tirx.log1p(val)
+
+    @staticmethod
+    def fabs(val):
+        return tvm.tirx.abs(val)
+
+    @staticmethod
+    def ceil(val):
+        return tvm.tirx.ceil(val)
+
+    @staticmethod
+    def floor(val):
+        return tvm.tirx.floor(val)
+
+    @staticmethod
+    def pow(base, exp):
+        return tvm.tirx.power(base, exp)
+
+    @staticmethod
+    def rsqrt(val):
+        return tvm.tirx.rsqrt(val)
+
+    @staticmethod
+    def nextafter(x1, x2):
+        return tvm.tirx.nextafter(x1, x2)
+
+    @staticmethod
+    def hypot(x1, x2):
+        return tvm.tirx.hypot(x1, x2)
+
+    @staticmethod
+    def copysign(x1, x2):
+        return tvm.tirx.copysign(x1, x2)
+
+    @staticmethod
+    def fmod(x, y):
+        return tvm.tirx.fmod(x, y)
+
+    # --- Control flow / misc intrinsics ---
+    @staticmethod
+    def continue_loop():
+        return tvm.tirx.Evaluate(tvm.tirx.continue_loop())
+
+    @staticmethod
+    def break_loop():
+        return tvm.tirx.Evaluate(tvm.tirx.break_loop())
+
+    @staticmethod
+    def undef():
+        return tvm.tirx.undef()
+
+    @staticmethod
+    def clz(x):
+        return tvm.tirx.clz(x)
+
+    @staticmethod
+    def tvm_storage_sync(scope):
+        return tvm.tirx.tvm_storage_sync(scope)
+
+    @staticmethod
+    def call_cpacked(func_name, *args, dtype="int32"):
+        call_args = [func_name if isinstance(func_name, tvm.tirx.PrimExpr) else tvm.tirx.StringImm(func_name), *args]
+        return tvm.tirx.Call(dtype, tvm.ir.Op.get("tirx.tvm_call_cpacked"), call_args)
+
+    @staticmethod
+    def env_thread(thread_tag):
+        """T.env_thread("threadIdx.x") → Var (used with T.launch_thread)."""
+        var = tvm.tirx.Var(thread_tag, "int32")
+        iv = tvm.tirx.IterVar(None, var, 1, thread_tag)
+        return iv
 
     @staticmethod
     def shift_left(a, b):
