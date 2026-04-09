@@ -812,6 +812,17 @@ def _tir_make_assign(parser, node, rhs_val):
         rhs_val = tvm.tirx.IntImm("int32", rhs_val)
     elif isinstance(rhs_val, float):
         rhs_val = tvm.tirx.FloatImm("float32", rhs_val)
+    # Convert BufferRegion → BufferLoad with Ramp (vector load, e.g. A[0:4])
+    if isinstance(rhs_val, tvm.tirx.BufferRegion):
+        buf = rhs_val.buffer
+        region = list(rhs_val.region)
+        indices = []
+        for r in region:
+            if isinstance(r.extent, tvm.tirx.IntImm) and r.extent.value == 1:
+                indices.append(r.min)
+            else:
+                indices.append(tvm.tirx.Ramp(r.min, tvm.tirx.IntImm(r.min.dtype, 1), r.extent))
+        rhs_val = tvm.tirx.BufferLoad(buf, indices)
     # If RHS is a PrimExpr (not a Stmt), create a Bind node
     if isinstance(rhs_val, tvm.tirx.PrimExpr):
         # Check for type annotation on the AST node
