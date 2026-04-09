@@ -486,7 +486,8 @@ class _SBlockSurfaceInstance(SurfaceObject):
         tir_iter_vars = []
         tir_iter_values = []
         for ab in iter_vars:
-            dom = tvm.ir.Range(tvm.tirx.IntImm("int32", 0), ab.extent)
+            ext_dtype = str(ab.extent.dtype) if hasattr(ab.extent, "dtype") else "int32"
+            dom = tvm.ir.Range(tvm.tirx.IntImm(ext_dtype, 0), ab.extent)
             var = ab._var  # set by _tir_make_assign when it sees _AxisBinding
             iv = tvm.tirx.IterVar(dom, var, ab.iter_type, "")
             tir_iter_vars.append(iv)
@@ -733,6 +734,13 @@ def _tir_make_assign(parser, node, rhs_val):
     """TIR assign callback: handles alloc_buffer, match_buffer, Bind, and plain bindings."""
     name = node.lhs.name
     if isinstance(rhs_val, _VarDeclMarker):
+        # If already pre-scanned (e.g. Relax symbolic dim var), reuse it
+        try:
+            existing = parser.var_table.lookup(name)
+            if isinstance(existing, tvm.tirx.Var):
+                return None  # already defined by pre-scan
+        except Exception:
+            pass
         if rhs_val.is_size_var:
             var = tvm.tirx.SizeVar(name, rhs_val.dtype)
         else:
@@ -740,7 +748,8 @@ def _tir_make_assign(parser, node, rhs_val):
         parser.var_table.define(name, var)
         return None
     if isinstance(rhs_val, _AxisBinding):
-        var = tvm.tirx.Var(name, "int32")
+        ext_dtype = str(rhs_val.extent.dtype) if hasattr(rhs_val.extent, "dtype") else "int32"
+        var = tvm.tirx.Var(name, ext_dtype)
         parser.var_table.define(name, var)
         rhs_val._var = var
         return rhs_val
@@ -1507,6 +1516,9 @@ class _RelaxFuncSurface(SurfaceObject):
                 if isinstance(rhs_val, _FuncAttrMarker):
                     func_attrs.update(rhs_val.attrs)
                     continue
+                if isinstance(rhs_val, _VarDeclMarker):
+                    # Symbolic dim var (e.g. N = T.int64()) — already pre-scanned
+                    continue
                 if isinstance(rhs_val, _RelaxMatchCastMarker):
                     var = bb.match_cast(rhs_val.value, rhs_val.struct_info, name)
                     parser.var_table.define(name, var)
@@ -1558,6 +1570,44 @@ class _RelaxFuncSurface(SurfaceObject):
         from tvm_ffi import pyast
 
         bb = relax.BlockBuilder()
+
+        # Pre-scan: forward-declare symbolic dimension variables (e.g. example 3273).
+        #
+        # Relax functions use symbolic dims like R.Shape(["N"]) in parameter
+        # annotations, but the variable `N` is defined later in the body as
+        # `N = T.int64()`. To ensure the annotation and body refer to the
+        # *same* Var object (required for structural equality), we pre-scan
+        # the body for `name = T.int64()` / `T.int64(is_size_var=True)`
+        # declarations and create them before parsing params. This mirrors
+        # the V1 parser's approach. The parser var_table reference is
+        # temporarily stored on _RelaxModule so that R.Shape/R.shape can
+        # convert string dims to the pre-created vars.
+        for stmt in node.body:
+            if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
+                if isinstance(stmt.rhs, pyast.Call):
+                    callee = stmt.rhs.callee
+                    # Match `T.int64()`, `T.int32()`, etc. — dtype() with no positional args
+                    if (isinstance(callee, pyast.Attr) and len(stmt.rhs.args) == 0
+                            and isinstance(callee.obj, pyast.Id)):
+                        name = stmt.lhs.name
+                        try:
+                            parser.var_table.lookup(name)
+                        except Exception:
+                            # Not yet defined — create it
+                            dtype = callee.name  # e.g. "int64"
+                            is_size_var = False
+                            for k, v in zip(stmt.rhs.kwargs_keys, stmt.rhs.kwargs_values):
+                                if str(k) == "is_size_var":
+                                    is_size_var = True
+                            if is_size_var:
+                                var = tvm.tirx.SizeVar(name, dtype)
+                            else:
+                                var = tvm.tirx.Var(name, dtype)
+                            parser.var_table.define(name, var)
+
+        # Store parser on module so R.Shape/R.shape can resolve string dims
+        _RelaxModule._parser = parser
+
         params = []
         for arg in node.args:
             name = arg.lhs.name
@@ -1596,6 +1646,8 @@ class _RelaxFuncSurface(SurfaceObject):
             is_pure=self._pure,
             attrs=tvm.ir.make_node("ir.DictAttrs", **final_attrs) if final_attrs else None,
         )
+        # Clean up parser reference stored for R.Shape string dim resolution
+        _RelaxModule._parser = None
         return func
 
 
@@ -1653,15 +1705,44 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
         return relax.TupleStructInfo(list(args))
 
     @staticmethod
+    def _resolve_shape_dims(dims):
+        """Convert string dim names to tir Vars via pre-scanned var_table.
+
+        When R.Shape(["N"]) is used in a param annotation, "N" is a string
+        that must become a tvm.tirx.Var("N", "int64") — the same object that
+        `N = T.int64()` later creates. See example 3273 and the pre-scan in
+        _RelaxFuncSurface.parse_function for context.
+        """
+        resolved = []
+        for d in dims:
+            if isinstance(d, str):
+                # Try to resolve from parser var_table (set during parse_function)
+                parser = getattr(_RelaxModule, "_parser", None)
+                if parser is not None:
+                    try:
+                        resolved.append(parser.var_table.lookup(d))
+                        continue
+                    except Exception:
+                        pass
+                # Fallback: create a fresh int64 Var
+                import tvm.tirx
+                resolved.append(tvm.tirx.Var(d, "int64"))
+            else:
+                resolved.append(d)
+        return resolved
+
+    @staticmethod
     def shape(dims):
         from tvm import relax
-        return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+        dims = _RelaxModule._resolve_shape_dims(dims if isinstance(dims, list) else list(dims))
+        return relax.ShapeStructInfo(dims)
 
     @staticmethod
     def Shape(dims=None, ndim=-1):
         from tvm import relax
         if dims is not None:
-            return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+            dims = _RelaxModule._resolve_shape_dims(dims if isinstance(dims, list) else list(dims))
+            return relax.ShapeStructInfo(dims)
         return relax.ShapeStructInfo(ndim=ndim)
 
     @staticmethod
