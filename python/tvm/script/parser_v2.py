@@ -131,6 +131,7 @@ class _PrimFuncSurface(SurfaceObject):
                 parser.handle_return,
                 parser.handle_while,
                 parser.handle_if,
+                parser.handle_assert,
             )
             parser.make_assign = _tir_make_assign
             parser.make_store = _tir_make_store
@@ -139,6 +140,7 @@ class _PrimFuncSurface(SurfaceObject):
             parser.handle_return = _tir_handle_return
             parser.handle_while = _tir_handle_while
             parser.handle_if = _tir_handle_if
+            parser.handle_assert = _tir_handle_assert
             try:
                 body_stmts = parser.visit_body(node.body)
             finally:
@@ -150,6 +152,7 @@ class _PrimFuncSurface(SurfaceObject):
                     parser.handle_return,
                     parser.handle_while,
                     parser.handle_if,
+                    parser.handle_assert,
                 ) = old
 
             # Collect func_attr markers, sblock_alloc_buffer, and wrap
@@ -191,8 +194,17 @@ class _PrimFuncSurface(SurfaceObject):
             # Collect final buffer_map (may have been updated by match_buffer)
             buffer_map = getattr(parser, '_tir_buffer_map', buffer_map)
 
+            # Parse return type annotation
+            ret_type = None
+            if node.return_type is not None:
+                ret_ann = parser.eval_expr(node.return_type)
+                if isinstance(ret_ann, _DtypeHelper):
+                    ret_type = tvm.ir.PrimType(ret_ann._dtype)
+                elif isinstance(ret_ann, str):
+                    ret_type = tvm.ir.PrimType(ret_ann)
+
             func_name = node.name.name
-            pf = tvm.tirx.PrimFunc(params, body, buffer_map=buffer_map)
+            pf = tvm.tirx.PrimFunc(params, body, ret_type=ret_type, buffer_map=buffer_map)
             if not self._private:
                 pf = pf.with_attr("global_symbol", func_name)
             for k, v in extra_attrs.items():
@@ -211,19 +223,33 @@ class _IRModuleSurface(SurfaceObject):
     def parse_class(self, parser, node):
         with parser.var_table.frame():
             # Pass 1: forward-declare all function GlobalVars
+            gv_map = {}  # name → GlobalVar
             for stmt in node.body:
                 from tvm_ffi import pyast
 
                 if isinstance(stmt, pyast.Function):
                     gv = tvm.ir.GlobalVar(stmt.name.name)
                     parser.var_table.define(stmt.name.name, gv)
+                    gv_map[stmt.name.name] = gv
+
+            # Define the class name as a module alias so that
+            # "Module.func_name" resolves to the GlobalVar.
+            # The V2 printer emits "Module.func()" for cross-function calls.
+            class _ModuleAlias:
+                def __getattr__(self, name):
+                    if name in gv_map:
+                        return gv_map[name]
+                    raise AttributeError(f"Module has no function '{name}'")
+
+            class_name = node.name.name  # e.g. "Module"
+            parser.var_table.define(class_name, _ModuleAlias())
 
             # Pass 2: parse function bodies
             funcs = {}
             for stmt in node.body:
                 func_ir = parser.visit_stmt(stmt)
                 func_name = stmt.name.name
-                gv = parser.var_table.get(func_name)
+                gv = gv_map[func_name]
                 funcs[gv] = func_ir
 
             return tvm.ir.IRModule(funcs)
@@ -334,6 +360,12 @@ class _AxisBinding:
         self.iter_type = iter_type  # 0=spatial, 1=reduce, 2=scan, 3=opaque
 
 
+class _WhereMarker:
+    """Marker for T.where(cond) — sets predicate on SBlockRealize."""
+    def __init__(self, cond):
+        self.cond = cond
+
+
 class _ReadsMarker:
     """Marker for T.reads(...)."""
     def __init__(self, regions):
@@ -416,6 +448,8 @@ class _SBlockSurfaceInstance(SurfaceObject):
                 init_body = s.body
             elif isinstance(s, _SBlockAllocBufferMarker):
                 alloc_buffers.append(s.buf)
+            elif isinstance(s, _WhereMarker):
+                pass  # handled below
             elif isinstance(s, tvm.tirx.Stmt):
                 real_body.append(s)
 
@@ -442,7 +476,12 @@ class _SBlockSurfaceInstance(SurfaceObject):
             alloc_buffers=alloc_buffers, match_buffers=[],
             annotations=annotations,
         )
+        # Collect predicate from T.where(cond)
         pred = tvm.tirx.IntImm("bool", 1)
+        for s in body_stmts:
+            if isinstance(s, _WhereMarker):
+                pred = s.cond
+                break
         return tvm.tirx.SBlockRealize(tir_iter_values, pred, sb)
 
 
@@ -490,10 +529,12 @@ class _LaunchThreadInstance(SurfaceObject):
         elif not isinstance(thread_tag, str):
             thread_tag = str(thread_tag)
 
+        # Infer dtype from extent
+        ext_dtype = getattr(self._extent, "dtype", "int32")
         if already_defined_var is not None:
             # Var already defined: no `as` clause
             iv = tvm.tirx.IterVar(
-                tvm.ir.Range(tvm.tirx.IntImm("int32", 0), self._extent),
+                tvm.ir.Range(tvm.tirx.IntImm(ext_dtype, 0), self._extent),
                 already_defined_var, 1, thread_tag,
             )
             body_stmts = parser.visit_body(node.body)
@@ -505,10 +546,10 @@ class _LaunchThreadInstance(SurfaceObject):
         else:
             # New var from `as` clause
             var_name = node.lhs.name if node.lhs is not None else "v"
-            var = tvm.tirx.Var(var_name, "int32")
+            var = tvm.tirx.Var(var_name, ext_dtype)
             parser.var_table.define(var_name, var)
             iv = tvm.tirx.IterVar(
-                tvm.ir.Range(tvm.tirx.IntImm("int32", 0), self._extent),
+                tvm.ir.Range(tvm.tirx.IntImm(ext_dtype, 0), self._extent),
                 var, 1, thread_tag,
             )
             body_stmts = parser.visit_body(node.body)
@@ -542,19 +583,20 @@ class _ForKindSurface(SurfaceObject):
     def __init__(self, kind):
         self._kind = kind
 
-    def __call__(self, extent, start=None, thread=None, **kwargs):
+    def __call__(self, extent, start=None, thread=None, annotations=None, **kwargs):
         """Called as T.unroll(2) or T.thread_binding(4, thread='blockIdx.x')."""
-        return _ForKindSurfaceInstance(self._kind, extent, start, thread=thread)
+        return _ForKindSurfaceInstance(self._kind, extent, start, thread=thread, annotations=annotations)
 
 
 class _ForKindSurfaceInstance(SurfaceObject):
     """Instance created by T.unroll(2) — captures args, dispatches parse_for."""
 
-    def __init__(self, kind, extent, start=None, thread=None):
+    def __init__(self, kind, extent, start=None, thread=None, annotations=None):
         self._kind = kind
         self._extent = extent
         self._start = start if start is not None else tvm.tirx.IntImm("int32", 0)
         self._thread = thread
+        self._annotations = annotations
 
     def parse_for(self, parser, node):
         loop_var = tvm.tirx.Var(node.lhs.name, "int32")
@@ -581,6 +623,7 @@ class _ForKindSurfaceInstance(SurfaceObject):
         return tvm.tirx.For(
             loop_var, start, extent, int(self._kind), body,
             thread_binding=thread_binding,
+            annotations=self._annotations or {},
         )
 
 
@@ -589,10 +632,30 @@ class _ForKindSurfaceInstance(SurfaceObject):
 # ============================================================================
 
 
+def _tir_handle_assert(parser, node):
+    """TIR assert handler: `assert cond, (kind, [msgs])` → AssertStmt."""
+    cond = parser.eval_expr(node.cond)
+    kind = "AssertionError"
+    message_parts = []
+    if node.msg is not None:
+        msg = parser.eval_expr(node.msg)
+        if isinstance(msg, (tuple, list)) and len(msg) >= 1:
+            kind = msg[0] if isinstance(msg[0], str) else str(msg[0])
+            if len(msg) >= 2 and isinstance(msg[1], (list, tuple)):
+                message_parts = [tvm.tirx.StringImm(str(s)) for s in msg[1]]
+        elif isinstance(msg, str):
+            message_parts = [tvm.tirx.StringImm(msg)]
+    return tvm.tirx.AssertStmt(cond, tvm.tirx.StringImm(kind), message_parts)
+
+
 def _tir_handle_return(parser, node):
     """TIR return handler: `return val` → Evaluate(Call(tirx.ret, [val]))."""
     if node.value is not None:
         val = parser.eval_expr(node.value)
+        if isinstance(val, int):
+            val = tvm.tirx.IntImm("int32", val)
+        elif isinstance(val, float):
+            val = tvm.tirx.FloatImm("float32", val)
         op = tvm.tirx.op.Op.get("tirx.ret")
         dtype = val.dtype if hasattr(val, "dtype") else "void"
         ret_call = tvm.tirx.Call(dtype, op, [val])
@@ -635,7 +698,10 @@ def _tir_make_assign(parser, node, rhs_val):
     """TIR assign callback: handles alloc_buffer, match_buffer, Bind, and plain bindings."""
     name = node.lhs.name
     if isinstance(rhs_val, _VarDeclMarker):
-        var = tvm.tirx.Var(name, rhs_val.dtype)
+        if rhs_val.is_size_var:
+            var = tvm.tirx.SizeVar(name, rhs_val.dtype)
+        else:
+            var = tvm.tirx.Var(name, rhs_val.dtype)
         parser.var_table.define(name, var)
         return None
     if isinstance(rhs_val, _AxisBinding):
@@ -692,6 +758,11 @@ def _tir_make_assign(parser, node, rhs_val):
                 dtype = ann
             elif isinstance(ann, str):
                 dtype = ann
+        # If rhs is a Call with empty/mismatched dtype and we have annotation dtype,
+        # reconstruct the Call with the correct dtype (e.g. GlobalVar call fallback)
+        if (isinstance(rhs_val, tvm.tirx.Call) and isinstance(dtype, str)
+                and dtype and rhs_val.dtype != dtype):
+            rhs_val = tvm.tirx.Call(dtype, rhs_val.op, list(rhs_val.args))
         var = tvm.tirx.Var(name, dtype)
         parser.var_table.define(name, var)
         return tvm.tirx.Bind(var, rhs_val)
@@ -750,8 +821,9 @@ class _FuncAttrMarker:
 
 class _VarDeclMarker:
     """Marker for T.int32() — declares a Var with given dtype."""
-    def __init__(self, dtype):
+    def __init__(self, dtype, is_size_var=False):
         self.dtype = dtype
+        self.is_size_var = is_size_var
 
 
 class _MatchBufferResult:
@@ -821,10 +893,11 @@ class _DtypeHelper:
     """
     def __init__(self, dtype):
         self._dtype = dtype
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
+        is_size_var = kwargs.get("is_size_var", False)
         if len(args) == 0:
             # T.int32() with no args — marker for "declare a Var with this dtype"
-            return _VarDeclMarker(self._dtype)
+            return _VarDeclMarker(self._dtype, is_size_var=is_size_var)
         if len(args) == 1:
             value = args[0]
             if isinstance(value, str):
@@ -991,8 +1064,8 @@ class _TIRModule:
     def where(cond, true_val=None, false_val=None):
         if true_val is not None and false_val is not None:
             return tvm.tirx.Select(cond, true_val, false_val)
-        # T.where(cond) with one arg — just the condition
-        return cond
+        # T.where(cond) with one arg — SBlock predicate marker
+        return _WhereMarker(cond)
 
     And = staticmethod(lambda a, b: tvm.tirx.And(a, b))
     Or = staticmethod(lambda a, b: tvm.tirx.Or(a, b))
@@ -1018,8 +1091,9 @@ class _TIRModule:
         return value
 
     @staticmethod
-    def call_packed(func_name, *args, dtype="void"):
-        return tvm.tirx.call_packed(func_name, *args, dtype=dtype)
+    def call_packed(func_name, *args, dtype="int32"):
+        call_args = [func_name if isinstance(func_name, tvm.tirx.PrimExpr) else tvm.tirx.StringImm(func_name), *args]
+        return tvm.tirx.Call(dtype, tvm.ir.Op.get("tirx.tvm_call_packed"), call_args)
 
     @staticmethod
     def call_pure_extern(dtype, func_name, *args):
