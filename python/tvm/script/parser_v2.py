@@ -1466,6 +1466,17 @@ class _RelaxMatchCastMarker:
         self.struct_info = struct_info
 
 
+class _RelaxDataflowMarker:
+    """Marker for R.dataflow() — triggers dataflow block in parse_function."""
+    pass
+
+
+class _RelaxOutputMarker:
+    """Marker for R.output(var1, var2, ...) — triggers emit_output in dataflow."""
+    def __init__(self, vars):
+        self.vars = vars
+
+
 class _RelaxFuncSurface(SurfaceObject):
     """Surface object for @R.function decorator."""
 
@@ -1479,6 +1490,68 @@ class _RelaxFuncSurface(SurfaceObject):
         surf._private = private
         surf._pure = pure
         return surf
+
+    def _process_relax_stmts(self, parser, stmts, bb, func_attrs,
+                             is_dataflow=False, output_names=None):
+        """Process a list of Relax body statements, emitting to BlockBuilder."""
+        from tvm import relax
+        from tvm_ffi import pyast
+
+        if output_names is None:
+            output_names = set()
+
+        for stmt in stmts:
+            if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
+                rhs_val = parser.eval_expr(stmt.rhs)
+                name = stmt.lhs.name
+                if isinstance(rhs_val, _FuncAttrMarker):
+                    func_attrs.update(rhs_val.attrs)
+                    continue
+                if isinstance(rhs_val, _RelaxMatchCastMarker):
+                    var = bb.match_cast(rhs_val.value, rhs_val.struct_info, name)
+                    parser.var_table.define(name, var)
+                    continue
+                # In dataflow: output names → emit_output, others → emit
+                if is_dataflow and name in output_names:
+                    var = bb.emit_output(rhs_val, name)
+                else:
+                    var = bb.emit(rhs_val, name)
+                parser.var_table.define(name, var)
+            elif isinstance(stmt, pyast.Return):
+                if stmt.value is not None:
+                    ret_val = parser.eval_expr(stmt.value)
+                    bb.emit_func_output(ret_val)
+            elif isinstance(stmt, pyast.With):
+                # Handle `with R.dataflow(): ...`
+                ctx_val = parser.eval_expr(stmt.rhs)
+                if isinstance(ctx_val, _RelaxDataflowMarker):
+                    # Two-pass: find output names, then emit
+                    output_names = set()
+                    for s in stmt.body:
+                        if isinstance(s, pyast.ExprStmt):
+                            call = s.expr
+                            if isinstance(call, pyast.Call) and isinstance(call.callee, pyast.Attr):
+                                if call.callee.name == "output":
+                                    for arg in call.args:
+                                        if isinstance(arg, pyast.Id):
+                                            output_names.add(arg.name)
+                    with bb.dataflow():
+                        self._process_relax_stmts(
+                            parser, stmt.body, bb, func_attrs,
+                            is_dataflow=True, output_names=output_names,
+                        )
+                else:
+                    pass  # skip unknown with blocks
+            elif isinstance(stmt, pyast.ExprStmt):
+                val = parser.eval_expr(stmt.expr)
+                if isinstance(val, _FuncAttrMarker):
+                    func_attrs.update(val.attrs)
+                elif isinstance(val, _RelaxOutputMarker):
+                    # R.output outside dataflow — just skip
+                    pass
+                elif val is not None:
+                    bb.emit(val)
+            # Skip other statement types
 
     def parse_function(self, parser, node):
         from tvm import relax
@@ -1507,31 +1580,7 @@ class _RelaxFuncSurface(SurfaceObject):
         func_attrs = {}
 
         with bb.function(func_name, params):
-            # Parse body statements → emit bindings
-            for stmt in node.body:
-                if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
-                    rhs_val = parser.eval_expr(stmt.rhs)
-                    name = stmt.lhs.name
-                    if isinstance(rhs_val, _FuncAttrMarker):
-                        func_attrs.update(rhs_val.attrs)
-                        continue
-                    if isinstance(rhs_val, _RelaxMatchCastMarker):
-                        var = bb.match_cast(rhs_val.value, rhs_val.struct_info, name)
-                        parser.var_table.define(name, var)
-                        continue
-                    var = bb.emit(rhs_val, name)
-                    parser.var_table.define(name, var)
-                elif isinstance(stmt, pyast.Return):
-                    if stmt.value is not None:
-                        ret_val = parser.eval_expr(stmt.value)
-                        bb.emit_func_output(ret_val)
-                elif isinstance(stmt, pyast.ExprStmt):
-                    val = parser.eval_expr(stmt.expr)
-                    if isinstance(val, _FuncAttrMarker):
-                        func_attrs.update(val.attrs)
-                    elif val is not None:
-                        bb.emit(val)
-                # Skip other statement types
+            self._process_relax_stmts(parser, node.body, bb, func_attrs)
 
         mod = bb.get()
         func = mod[func_name]
@@ -1633,6 +1682,14 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
                 value = tvm.tirx.IntImm("int64", value)
             return relax.PrimStructInfo(value=value)
         return relax.PrimStructInfo(dtype)
+
+    @staticmethod
+    def dataflow():
+        return _RelaxDataflowMarker()
+
+    @staticmethod
+    def output(*args):
+        return _RelaxOutputMarker(list(args))
 
     @staticmethod
     def tuple(*args):
