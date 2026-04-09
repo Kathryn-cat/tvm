@@ -194,12 +194,7 @@ class _PrimFuncSurface(SurfaceObject):
             body_stmts = wrapped
 
             # Construct body
-            if len(body_stmts) == 1:
-                body = body_stmts[0]
-            elif len(body_stmts) > 1:
-                body = tvm.tirx.SeqStmt(body_stmts)
-            else:
-                body = tvm.tirx.Evaluate(tvm.tirx.IntImm("int32", 0))
+            body = _wrap_body_stmts(body_stmts)
 
             # Wrap in root SBlockRealize if needed (but not if body is already one)
             body_is_sblock = isinstance(body, tvm.tirx.SBlockRealize)
@@ -397,7 +392,7 @@ class _InitSurface(SurfaceObject):
         if len(body_stmts) == 1:
             body = body_stmts[0]
         else:
-            body = tvm.tirx.SeqStmt(body_stmts)
+            body = _wrap_body_stmts(body_stmts)
         return _InitMarker(body)
 
 
@@ -625,7 +620,7 @@ class _LaunchThreadInstance(SurfaceObject):
             if len(body_stmts) == 1:
                 body = body_stmts[0]
             else:
-                body = tvm.tirx.SeqStmt(body_stmts)
+                body = _wrap_body_stmts(body_stmts)
             return tvm.tirx.AttrStmt(iv, "thread_extent", self._extent, body)
         else:
             # New var from `as` clause
@@ -640,7 +635,7 @@ class _LaunchThreadInstance(SurfaceObject):
             if len(body_stmts) == 1:
                 body = body_stmts[0]
             else:
-                body = tvm.tirx.SeqStmt(body_stmts)
+                body = _wrap_body_stmts(body_stmts)
             return tvm.tirx.AttrStmt(iv, "thread_extent", self._extent, body)
 
 
@@ -654,10 +649,7 @@ class _AttrSurfaceInstance(SurfaceObject):
 
     def parse_with(self, parser, node):
         body_stmts = parser.visit_body(node.body)
-        if len(body_stmts) == 1:
-            body = body_stmts[0]
-        else:
-            body = tvm.tirx.SeqStmt(body_stmts)
+        body = _wrap_body_stmts(body_stmts)
         return tvm.tirx.AttrStmt(self._node_val, self._attr_key, self._value, body)
 
 
@@ -791,12 +783,9 @@ def _tir_make_assign(parser, node, rhs_val):
     name = node.lhs.name
     if isinstance(rhs_val, _VarDeclMarker):
         # If already pre-scanned (e.g. Relax symbolic dim var), reuse it
-        try:
-            existing = parser.var_table.lookup(name)
-            if isinstance(existing, tvm.tirx.Var):
-                return None  # already defined by pre-scan
-        except Exception:
-            pass
+        existing = parser.var_table.get(name)
+        if existing is not None and isinstance(existing, tvm.tirx.Var):
+            return None  # already defined by pre-scan
         if rhs_val.is_size_var:
             var = tvm.tirx.SizeVar(name, rhs_val.dtype)
         else:
@@ -1072,6 +1061,16 @@ class _TIRModuleMeta(type):
         import tvm.tirx
         if hasattr(tvm.tirx, name):
             return getattr(tvm.tirx, name)
+        # Last resort: try as a TIR op via call_intrin (e.g. tvm_warp_shuffle)
+        try:
+            op = tvm.tirx.op.Op.get(f"tirx.{name}")
+            def _intrin_wrapper(*args):
+                # Infer dtype from first arg or default to int32
+                dtype = args[0].dtype if args and hasattr(args[0], "dtype") else "int32"
+                return tvm.tirx.call_intrin(dtype, f"tirx.{name}", *args)
+            return _intrin_wrapper
+        except Exception:
+            pass
         raise AttributeError(f"type object '_TIRModule' has no attribute '{name}'")
 
 
@@ -1688,6 +1687,59 @@ class _RelaxFuncSurface(SurfaceObject):
                         )
                 else:
                     pass  # skip unknown with blocks
+            elif isinstance(stmt, pyast.If):
+                # Relax if/else → relax.If(cond, SeqExpr, SeqExpr)
+                # Each branch is a SeqExpr with bindings and a body value.
+                cond_val = parser.eval_expr(stmt.cond)
+
+                def _build_branch(branch_stmts):
+                    """Build a SeqExpr for one if/else branch.
+
+                    Simple branches (single assignment) → SeqExpr([], rhs_value).
+                    Complex branches (multiple stmts) → SeqExpr([BindingBlock], last_var).
+                    """
+                    values = []  # (name, rhs_val, sinfo)
+                    for s in branch_stmts:
+                        if isinstance(s, pyast.Assign) and s.rhs is not None:
+                            val = parser.eval_expr(s.rhs)
+                            name = s.lhs.name
+                            if isinstance(val, _VarDeclMarker):
+                                continue
+                            sinfo = None
+                            if s.annotation is not None:
+                                sinfo = parser.eval_expr(s.annotation)
+                                if isinstance(sinfo, _RelaxTensorSInfo):
+                                    sinfo = sinfo()
+                            values.append((name, val, sinfo))
+                    if not values:
+                        return relax.SeqExpr([], relax.Tuple([]))
+                    if len(values) == 1:
+                        # Simple: just return the value, no bindings
+                        name, val, sinfo = values[0]
+                        parser.var_table.define(name, val)
+                        return relax.SeqExpr([], val)
+                    # Complex: create bindings for all but last, body = last
+                    bindings = []
+                    for name, val, sinfo in values[:-1]:
+                        var = relax.Var(name, sinfo) if sinfo else relax.Var(name)
+                        bindings.append(relax.VarBinding(var, val))
+                        parser.var_table.define(name, var)
+                    last_name, last_val, last_sinfo = values[-1]
+                    last_var = relax.Var(last_name, last_sinfo) if last_sinfo else relax.Var(last_name)
+                    bindings.append(relax.VarBinding(last_var, last_val))
+                    parser.var_table.define(last_name, last_var)
+                    block = relax.BindingBlock(bindings)
+                    return relax.SeqExpr([block], last_var)
+
+                then_expr = _build_branch(stmt.then_branch)
+                else_expr = _build_branch(stmt.else_branch) if stmt.else_branch else relax.SeqExpr([], relax.Tuple([]))
+                if_node = relax.If(cond_val, then_expr, else_expr)
+                out_var = bb.emit(if_node)
+                # Define last variable name from then branch for use after if
+                for s in reversed(stmt.then_branch):
+                    if isinstance(s, pyast.Assign) and s.rhs is not None:
+                        parser.var_table.define(s.lhs.name, out_var)
+                        break
             elif isinstance(stmt, pyast.ExprStmt):
                 val = parser.eval_expr(stmt.expr)
                 if isinstance(val, _FuncAttrMarker):
@@ -1727,9 +1779,7 @@ class _RelaxFuncSurface(SurfaceObject):
                             and isinstance(callee.obj, pyast.Id)
                             and callee.obj.name == "T"):
                         name = stmt.lhs.name
-                        try:
-                            parser.var_table.lookup(name)
-                        except Exception:
+                        if parser.var_table.get(name) is None:
                             # Not yet defined — create it
                             dtype = callee.name  # e.g. "int64"
                             is_size_var = False
@@ -1896,11 +1946,10 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
                 # Try to resolve from parser var_table (set during parse_function)
                 parser = getattr(_RelaxModule, "_parser", None)
                 if parser is not None:
-                    try:
-                        resolved.append(parser.var_table.lookup(d))
+                    var = parser.var_table.get(d)
+                    if var is not None:
+                        resolved.append(var)
                         continue
-                    except Exception:
-                        pass
                 # Fallback: create a fresh int64 Var
                 import tvm.tirx
                 resolved.append(tvm.tirx.Var(d, "int64"))
