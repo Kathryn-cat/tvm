@@ -175,6 +175,8 @@ class _PrimFuncSurface(SurfaceObject):
                 elif isinstance(s, _SBlockAllocBufferMarker):
                     parser.var_table.define(s.buf.name, s.buf)
                     root_alloc_bufs.append(s.buf)
+                elif isinstance(s, _MatchBufferResult):
+                    pass  # already handled by _tir_make_assign buffer_map
                 elif isinstance(s, tvm.tirx.Stmt):
                     wrapped.append(s)
                 elif isinstance(s, tvm.tirx.PrimExpr):
@@ -479,6 +481,7 @@ class _SBlockSurfaceInstance(SurfaceObject):
         writes = []
         annotations = {}
         alloc_buffers = []
+        match_bufs = []
         init_body = None
         real_body = []
 
@@ -498,6 +501,11 @@ class _SBlockSurfaceInstance(SurfaceObject):
                 init_body = s.body
             elif isinstance(s, _SBlockAllocBufferMarker):
                 alloc_buffers.append(s.buf)
+            elif isinstance(s, _MatchBufferResult):
+                # match_buffer inside SBlock → MatchBufferRegion (see example 346)
+                source = s.param_var  # BufferRegion from A[8:16, 32:64]
+                if isinstance(source, tvm.tirx.BufferRegion):
+                    match_bufs.append(tvm.tirx.MatchBufferRegion(s.buffer, source))
             elif isinstance(s, _WhereMarker):
                 pass  # handled below
             elif isinstance(s, tvm.tirx.Stmt):
@@ -534,7 +542,7 @@ class _SBlockSurfaceInstance(SurfaceObject):
         sb = tvm.tirx.SBlock(
             tir_iter_vars, tir_reads, tir_writes,
             self._name, body, init=init_body,
-            alloc_buffers=alloc_buffers, match_buffers=[],
+            alloc_buffers=alloc_buffers, match_buffers=match_bufs,
             annotations=annotations,
         )
         # Collect predicate from T.where(cond)
@@ -798,7 +806,8 @@ def _tir_make_assign(parser, node, rhs_val):
         parser.var_table.define(name, buf)
         return rhs_val  # marker collected by PrimFunc or SBlock
     if isinstance(rhs_val, _MatchBufferResult):
-        # match_buffer: add to buffer_map, define buffer in var_table
+        # match_buffer: define buffer in var_table, return marker for caller to handle.
+        # PrimFunc collects as buffer_map entry; SBlock collects as MatchBufferRegion.
         buf = rhs_val.buffer
         # Set buffer name to match the LHS variable name, preserve all params
         scope = buf.scope() if callable(buf.scope) else buf.scope
@@ -810,16 +819,16 @@ def _tir_make_assign(parser, node, rhs_val):
             data_alignment=buf.data_alignment,
             offset_factor=buf.offset_factor,
         )
+        rhs_val.buffer = buf
         param_var = rhs_val.param_var
-        # Find the matching param Var and add to buffer_map
+        # Add to buffer_map if at function level (PrimFunc param match_buffer)
         if hasattr(parser, '_tir_buffer_map'):
-            # Find param var by identity or name
             for pv in getattr(parser, '_tir_params', []):
                 if pv.same_as(param_var) or (hasattr(param_var, 'name') and pv.name == param_var.name):
                     parser._tir_buffer_map[pv] = buf
                     break
         parser.var_table.define(name, buf)
-        return None  # no stmt emitted — buffer_map entry only
+        return rhs_val  # returned so SBlock can collect as MatchBufferRegion
     if isinstance(rhs_val, tuple) and len(rhs_val) == 2:
         # alloc_buffer / decl_buffer returns (buf, AllocBuffer/DeclBuffer node)
         buf, alloc_node = rhs_val
@@ -1133,8 +1142,9 @@ class _TIRModule(metaclass=_TIRModuleMeta):
     @staticmethod
     def exp(val):
         """T.exp(val) → Call(tirx.exp, [val])."""
-        dtype = val.dtype if hasattr(val, "dtype") else "float32"
-        return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp"), [val])
+        if isinstance(val, int): val = tvm.tirx.IntImm("int32", val)
+        elif isinstance(val, float): val = tvm.tirx.FloatImm("float32", val)
+        return tvm.tirx.Call(val.dtype, tvm.tirx.op.Op.get("tirx.exp"), [val])
 
     @staticmethod
     def attr(node_val, attr_key, value):
@@ -1326,8 +1336,9 @@ class _TIRModule(metaclass=_TIRModuleMeta):
 
     @staticmethod
     def exp10(val):
-        dtype = val.dtype if hasattr(val, "dtype") else "float32"
-        return tvm.tirx.Call(dtype, tvm.tirx.op.Op.get("tirx.exp10"), [val])
+        if isinstance(val, int): val = tvm.tirx.IntImm("int32", val)
+        elif isinstance(val, float): val = tvm.tirx.FloatImm("float32", val)
+        return tvm.tirx.Call(val.dtype, tvm.tirx.op.Op.get("tirx.exp10"), [val])
 
     @staticmethod
     def erf(val):
