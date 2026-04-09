@@ -265,18 +265,26 @@ class _IRModuleSurface(SurfaceObject):
             class_name = node.name.name  # e.g. "Module"
             parser.var_table.define(class_name, _ModuleAlias())
 
-            # Pass 2: parse function bodies
+            # Pass 2: parse function bodies, collect module attrs
             funcs = {}
+            module_attrs = {}
             for stmt in node.body:
                 from tvm_ffi import pyast
-                if not isinstance(stmt, pyast.Function):
-                    continue  # skip pass, expr stmts, etc.
-                func_ir = parser.visit_stmt(stmt)
-                func_name = stmt.name.name
-                gv = gv_map[func_name]
-                funcs[gv] = func_ir
+                if isinstance(stmt, pyast.Function):
+                    func_ir = parser.visit_stmt(stmt)
+                    func_name = stmt.name.name
+                    gv = gv_map[func_name]
+                    funcs[gv] = func_ir
+                elif isinstance(stmt, pyast.ExprStmt):
+                    val = parser.eval_expr(stmt.expr)
+                    if isinstance(val, _ModuleAttrsMarker):
+                        module_attrs.update(val.attrs)
+                # skip other stmts (pass, etc.)
 
-            return tvm.ir.IRModule(funcs)
+            mod = tvm.ir.IRModule(funcs)
+            if module_attrs:
+                mod = mod.with_attrs(module_attrs)
+            return mod
 
 
 # ============================================================================
@@ -629,10 +637,6 @@ class _ForKindSurfaceInstance(SurfaceObject):
         self._annotations = annotations
 
     def parse_for(self, parser, node):
-        loop_var = tvm.tirx.Var(node.lhs.name, "int32")
-        parser.var_table.define(node.lhs.name, loop_var)
-        body_stmts = parser.visit_body(node.body)
-        body = _wrap_body_stmts(body_stmts)
         extent = (
             self._extent
             if not isinstance(self._extent, int)
@@ -643,11 +647,17 @@ class _ForKindSurfaceInstance(SurfaceObject):
             if not isinstance(self._start, int)
             else tvm.tirx.IntImm("int32", self._start)
         )
+        # Infer loop var dtype from extent (e.g. T.thread_binding(T.int64(128)))
+        ext_dtype = str(extent.dtype) if hasattr(extent, "dtype") else "int32"
+        loop_var = tvm.tirx.Var(node.lhs.name, ext_dtype)
+        parser.var_table.define(node.lhs.name, loop_var)
+        body_stmts = parser.visit_body(node.body)
+        body = _wrap_body_stmts(body_stmts)
         # Thread binding: create IterVar with thread_tag
         # IterVar uses a separate "iter" var, not the loop_var
         thread_binding = None
         if self._thread is not None:
-            iter_var = tvm.tirx.Var("iter", "int32")
+            iter_var = tvm.tirx.Var("iter", ext_dtype)
             iv = tvm.tirx.IterVar(None, iter_var, 1, self._thread)
             thread_binding = iv
         return tvm.tirx.For(
@@ -853,17 +863,29 @@ def _tir_evaluate(value):
     return tvm.tirx.Evaluate(value)
 
 
-def _tir_decl_buffer(shape, dtype="float32", data=None, scope=""):
-    """T.decl_buffer(shape, dtype, data=...) → (Buffer, DeclBuffer node)."""
+def _tir_decl_buffer(shape, dtype="float32", data=None, scope="",
+                     strides=None, elem_offset=None, align=64, offset_factor=0):
+    """T.decl_buffer(shape, dtype, data=..., strides=..., elem_offset=...) → (Buffer, DeclBuffer)."""
     if isinstance(shape, tuple):
         shape = list(shape)
     shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
-    buf = tvm.tirx.decl_buffer(shape, dtype, data=data, scope=scope)
+    if strides is not None and isinstance(strides, (list, tuple)):
+        strides = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in strides]
+    buf = tvm.tirx.decl_buffer(
+        shape, dtype, data=data, scope=scope,
+        strides=strides or [], elem_offset=elem_offset,
+    )
     return buf, tvm.tirx.DeclBuffer(buf)
 
 
 class _FuncAttrMarker:
     """Marker for T.func_attr({...}) — collected by PrimFunc surface object."""
+    def __init__(self, attrs):
+        self.attrs = attrs
+
+
+class _ModuleAttrsMarker:
+    """Marker for I.module_attrs({...}) — collected by IRModule surface object."""
     def __init__(self, attrs):
         self.attrs = attrs
 
@@ -900,13 +922,13 @@ def _tir_match_buffer(param, shape, dtype="float32", scope="",
     return _MatchBufferResult(param, buf)
 
 
-def _tir_alloc_buffer(shape, dtype="float32", scope=""):
-    """T.alloc_buffer(shape, dtype, scope) → (Buffer, AllocBuffer node)."""
+def _tir_alloc_buffer(shape, dtype="float32", scope="", annotations=None):
+    """T.alloc_buffer(shape, dtype, scope, annotations) → (Buffer, AllocBuffer node)."""
     if isinstance(shape, tuple):
         shape = list(shape)
     shape = [tvm.tirx.IntImm("int32", s) if isinstance(s, int) else s for s in shape]
     buf = tvm.tirx.decl_buffer(shape, dtype, scope=scope)
-    return buf, tvm.tirx.AllocBuffer(buf, {})
+    return buf, tvm.tirx.AllocBuffer(buf, annotations or {})
 
 
 def _tir_float32(value):
@@ -969,7 +991,27 @@ class _DtypeHelper:
         return self._dtype
 
 
-class _TIRModule:
+class _TIRModuleMeta(type):
+    """Metaclass for _TIRModule to support dynamic vector dtype lookup.
+
+    Handles T.int32x4, T.float16x8, T.uint32x4, etc. by matching the
+    pattern <base_dtype>x<lanes> and returning a _DtypeHelper.
+    """
+    _vector_dtype_re = None
+
+    def __getattr__(cls, name):
+        import re
+        if cls._vector_dtype_re is None:
+            cls._vector_dtype_re = re.compile(
+                r'^(int|uint|float|bfloat|bool)(8|16|32|64)x(\d+)$'
+            )
+        m = cls._vector_dtype_re.match(name)
+        if m:
+            return _DtypeHelper(name)
+        raise AttributeError(f"type object '_TIRModule' has no attribute '{name}'")
+
+
+class _TIRModule(metaclass=_TIRModuleMeta):
     """Language module for TIR (the 'T' in `from tvm.script import tirx as T`)."""
 
     prim_func = _PrimFuncSurface()
@@ -1733,9 +1775,15 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
 
     @staticmethod
     def shape(dims):
+        """R.shape([T.int64(16)]) → ShapeExpr (value, not annotation).
+
+        Lowercase R.shape() returns a ShapeExpr for use as an argument to ops
+        like R.reshape, R.ones, R.zeros. Uppercase R.Shape() returns
+        ShapeStructInfo for type annotations.
+        """
         from tvm import relax
         dims = _RelaxModule._resolve_shape_dims(dims if isinstance(dims, list) else list(dims))
-        return relax.ShapeStructInfo(dims)
+        return relax.ShapeExpr(dims)
 
     @staticmethod
     def Shape(dims=None, ndim=-1):
@@ -1862,6 +1910,10 @@ class _IRLangModule:
 
     ir_module = _IRModuleSurface()
     GlobalVar = staticmethod(tvm.ir.GlobalVar)
+
+    @staticmethod
+    def module_attrs(attrs_dict):
+        return _ModuleAttrsMarker(attrs_dict)
 
 
 # ============================================================================
