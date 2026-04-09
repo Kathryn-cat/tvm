@@ -268,6 +268,7 @@ class _IRModuleSurface(SurfaceObject):
             # Pass 2: parse function bodies, collect module attrs
             funcs = {}
             module_attrs = {}
+            module_global_infos = {}
             for stmt in node.body:
                 from tvm_ffi import pyast
                 if isinstance(stmt, pyast.Function):
@@ -279,11 +280,16 @@ class _IRModuleSurface(SurfaceObject):
                     val = parser.eval_expr(stmt.expr)
                     if isinstance(val, _ModuleAttrsMarker):
                         module_attrs.update(val.attrs)
+                    elif isinstance(val, _ModuleGlobalInfosMarker):
+                        module_global_infos = val.infos
                 # skip other stmts (pass, etc.)
 
             mod = tvm.ir.IRModule(funcs)
             if module_attrs:
                 mod = mod.with_attrs(module_attrs)
+            if module_global_infos:
+                for key, infos in module_global_infos.items():
+                    mod.update_global_info(key, infos)
             return mod
 
 
@@ -1384,6 +1390,14 @@ class _TIRModule(metaclass=_TIRModuleMeta):
     def fmod(x, y):
         return tvm.tirx.fmod(x, y)
 
+    @staticmethod
+    def round(val):
+        return tvm.tirx.round(val)
+
+    @staticmethod
+    def trunc(val):
+        return tvm.tirx.trunc(val)
+
     # --- Control flow / misc intrinsics ---
     @staticmethod
     def continue_loop():
@@ -1628,9 +1642,12 @@ class _RelaxFuncSurface(SurfaceObject):
             if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
                 if isinstance(stmt.rhs, pyast.Call):
                     callee = stmt.rhs.callee
-                    # Match `T.int64()`, `T.int32()`, etc. — dtype() with no positional args
+                    # Match `T.int64()`, `T.int32()`, etc. — dtype() with no positional args.
+                    # Only match T.* calls (not R.* like R.print) to avoid treating
+                    # function names as dtypes (see example 3205).
                     if (isinstance(callee, pyast.Attr) and len(stmt.rhs.args) == 0
-                            and isinstance(callee.obj, pyast.Id)):
+                            and isinstance(callee.obj, pyast.Id)
+                            and callee.obj.name == "T"):
                         name = stmt.lhs.name
                         try:
                             parser.var_table.lookup(name)
@@ -1889,6 +1906,16 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
             return relax.const(val)
         return relax.const(val, dtype)
 
+    @staticmethod
+    def device(device_type=0, index=0):
+        """R.device(device_type=1, index=0) → VDevice-like for hint_on_device."""
+        return tvm.ir.VDevice(None, 0, "global")  # placeholder — actual device from context
+
+    @staticmethod
+    def StringImm(val):
+        from tvm import relax
+        return relax.StringImm(val)
+
     # --- Relax math/unary ops ---
     @staticmethod
     def _make_unary_op(op_name):
@@ -1905,6 +1932,12 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
         return _op
 
 
+class _ModuleGlobalInfosMarker:
+    """Marker for I.module_global_infos({...}) — collected by IRModule."""
+    def __init__(self, infos):
+        self.infos = infos
+
+
 class _IRLangModule:
     """Language module for IR (the 'I' in `from tvm.script import ir as I`)."""
 
@@ -1914,6 +1947,15 @@ class _IRLangModule:
     @staticmethod
     def module_attrs(attrs_dict):
         return _ModuleAttrsMarker(attrs_dict)
+
+    @staticmethod
+    def module_global_infos(infos_dict):
+        return _ModuleGlobalInfosMarker(infos_dict)
+
+    @staticmethod
+    def vdevice(target_dict, vdevice_id=0, memory_scope="global"):
+        target = tvm.target.Target(target_dict) if isinstance(target_dict, dict) else target_dict
+        return tvm.ir.VDevice(target, vdevice_id, memory_scope)
 
 
 # ============================================================================
