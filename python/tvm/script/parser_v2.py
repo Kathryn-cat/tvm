@@ -1709,6 +1709,12 @@ class _RelaxFuncSurface(SurfaceObject):
         if node.return_type is not None:
             ret_sinfo = parser.eval_expr(node.return_type)
 
+        # Clear parser reference BEFORE entering BlockBuilder scope.
+        # _resolve_shape_dims is only needed during param/return-type parsing;
+        # leaving _parser set during BB emission causes infinite hangs because
+        # BB normalization can trigger R.Tensor() calls that re-enter resolution.
+        _RelaxModule._parser = None
+
         func_name = node.name.name
         func_attrs = {}
 
@@ -1740,6 +1746,12 @@ class _RelaxTensorSInfo:
         from tvm import relax
         if isinstance(shape, tuple):
             shape = list(shape)
+        # Resolve string dim names to tir Vars during param parsing
+        # (e.g. R.Tensor(("M", "N")) — see example 3311/317).
+        # _parser is only set during param/return-type parsing, cleared before BB.
+        if shape is not None and getattr(_RelaxModule, "_parser", None) is not None:
+            if any(isinstance(d, str) for d in shape):
+                shape = _RelaxModule._resolve_shape_dims(shape)
         # When no dtype specified and no shape, dtype="" means unknown
         # When shape specified but no dtype, dtype="" means unknown
         if dtype is None:
