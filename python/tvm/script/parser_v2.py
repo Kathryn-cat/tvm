@@ -243,13 +243,20 @@ class _IRModuleSurface(SurfaceObject):
 
     def parse_class(self, parser, node):
         with parser.var_table.frame():
-            # Pass 1: forward-declare all function GlobalVars
+            # Pass 1: forward-declare all function GlobalVars with opaque FuncStructInfo.
+            # GlobalVars need struct_info for call_tir/call_tir_inplace validation
+            # (see example 180). Using make_node because GlobalVar() constructor
+            # doesn't accept struct_info, and struct_info_ property has no setter.
+            from tvm import relax
+            _opaque_func_sinfo = relax.FuncStructInfo.opaque_func()
             gv_map = {}  # name → GlobalVar
             for stmt in node.body:
                 from tvm_ffi import pyast
 
                 if isinstance(stmt, pyast.Function):
-                    gv = tvm.ir.GlobalVar(stmt.name.name)
+                    gv = tvm.ir.make_node("ir.GlobalVar",
+                                          name_hint=stmt.name.name,
+                                          struct_info_=_opaque_func_sinfo)
                     parser.var_table.define(stmt.name.name, gv)
                     gv_map[stmt.name.name] = gv
 
@@ -1697,6 +1704,9 @@ class _RelaxFuncSurface(SurfaceObject):
             ann = None
             if arg.annotation is not None:
                 ann = parser.eval_expr(arg.annotation)
+            # Convert bare _RelaxTensorSInfo → TensorStructInfo (e.g. R.Tensor without parens)
+            if isinstance(ann, _RelaxTensorSInfo):
+                ann = ann()
             if isinstance(ann, relax.StructInfo):
                 var = relax.Var(name, ann)
             else:
@@ -1907,13 +1917,33 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
         return relax.op.call_tir(func, args, out_sinfo, tir_vars=tir_vars)
 
     @staticmethod
+    def _normalize_sinfo_args(sinfo_args):
+        """Convert bare _RelaxTensorSInfo / class instances to actual StructInfo.
+
+        When sinfo_args=(R.Tensor,), R.Tensor is the _RelaxTensorSInfo instance
+        (not called), not a TensorStructInfo. Convert it. See example 716.
+        """
+        if not sinfo_args:
+            return None
+        from tvm import relax
+        result = []
+        for s in sinfo_args:
+            if isinstance(s, _RelaxTensorSInfo):
+                result.append(s())  # call with defaults → TensorStructInfo
+            elif isinstance(s, relax.StructInfo):
+                result.append(s)
+            else:
+                result.append(s)
+        return result
+
+    @staticmethod
     def call_packed(func_name, *args, sinfo_args=None, **kwargs):
         from tvm import relax
         if isinstance(func_name, str):
             func_name = relax.ExternFunc(func_name)
-        sinfo = list(sinfo_args) if sinfo_args else [relax.ObjectStructInfo()]
+        sinfo = _RelaxModule._normalize_sinfo_args(sinfo_args) or [relax.ObjectStructInfo()]
         return relax.Call(
-            relax.ExternFunc("call_packed") if isinstance(func_name, str) else func_name,
+            func_name,
             list(args),
             sinfo_args=sinfo,
         )
@@ -1921,7 +1951,7 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
     @staticmethod
     def call_pure_packed(func, *args, sinfo_args=None, **kwargs):
         from tvm import relax
-        sinfo = list(sinfo_args) if sinfo_args else [relax.ObjectStructInfo()]
+        sinfo = _RelaxModule._normalize_sinfo_args(sinfo_args) or [relax.ObjectStructInfo()]
         return relax.op.call_pure_packed(func, *args, sinfo_args=sinfo)
 
     @staticmethod
