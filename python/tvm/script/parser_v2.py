@@ -789,6 +789,7 @@ def _tir_make_assign(parser, node, rhs_val):
             strides=list(buf.strides) if buf.strides else [],
             elem_offset=buf.elem_offset if buf.elem_offset is not None else None,
             scope=scope,
+            data_alignment=buf.data_alignment,
             offset_factor=buf.offset_factor,
         )
         param_var = rhs_val.param_var
@@ -923,6 +924,7 @@ def _tir_match_buffer(param, shape, dtype="float32", scope="",
         shape, dtype, scope=scope,
         strides=strides or [],
         elem_offset=elem_offset,
+        data_alignment=align,
         offset_factor=offset_factor,
     )
     return _MatchBufferResult(param, buf)
