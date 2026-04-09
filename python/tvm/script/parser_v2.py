@@ -286,12 +286,15 @@ class _IRModuleSurface(SurfaceObject):
                     gv = gv_map[func_name]
                     funcs[gv] = func_ir
                 elif isinstance(stmt, pyast.ExprStmt):
+                    # Skip `pass` (represented as ExprStmt(Id("pass")) in pyast)
+                    if isinstance(stmt.expr, pyast.Id) and stmt.expr.name == "pass":
+                        continue
                     val = parser.eval_expr(stmt.expr)
                     if isinstance(val, _ModuleAttrsMarker):
                         module_attrs.update(val.attrs)
                     elif isinstance(val, _ModuleGlobalInfosMarker):
                         module_global_infos = val.infos
-                # skip other stmts (pass, etc.)
+                # skip other stmts
 
             mod = tvm.ir.IRModule(funcs)
             if module_attrs:
@@ -1869,7 +1872,8 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
 
     @staticmethod
     def str(val):
-        return val
+        from tvm import relax
+        return relax.StringImm(val)
 
     @staticmethod
     def dtype(val):
@@ -1900,11 +1904,17 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
         return relax.Tuple(list(args))
 
     @staticmethod
-    def Callable(ret=None, params=None, purity=True):
+    def Callable(params=None, ret=None, purity=True):
+        """R.Callable() → opaque, R.Callable(params, ret, purity) → FuncStructInfo."""
         from tvm import relax
-        if ret is None and params is None:
+        if params is None and ret is None:
             return relax.FuncStructInfo.opaque_func()
-        return relax.FuncStructInfo(params or [], ret)
+        # Normalize params: convert bare _RelaxTensorSInfo to StructInfo
+        if isinstance(params, (list, tuple)):
+            params = [s() if isinstance(s, _RelaxTensorSInfo) else s for s in params]
+        if isinstance(ret, _RelaxTensorSInfo):
+            ret = ret()
+        return relax.FuncStructInfo(params or [], ret, purity=purity)
 
     @staticmethod
     def ExternFunc(name):
@@ -1966,12 +1976,12 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
         return relax.op.call_pure_packed(func, *args, sinfo_args=sinfo)
 
     @staticmethod
-    def assert_op(cond, msg=None, format=None):
+    def assert_op(cond, *args, format=None):
+        """R.assert_op(cond, val1, val2, ..., format=R.str("x: {}"))."""
         from tvm import relax
-        args = [cond]
-        if format is not None:
-            args.append(format)
-        return relax.op.assert_op(cond, format or relax.StringImm(""))
+        vals = list(args)  # extra positional args are format values
+        fmt = format if format is not None else relax.StringImm("")
+        return relax.op.assert_op(cond, vals, fmt)
 
     @staticmethod
     def const(val, dtype=None):
