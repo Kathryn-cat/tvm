@@ -495,6 +495,16 @@ class _SBlockSurfaceInstance(SurfaceObject):
                 pass  # handled below
             elif isinstance(s, tvm.tirx.Stmt):
                 real_body.append(s)
+            elif isinstance(s, tvm.tirx.PrimExpr):
+                # Bare expressions (e.g. T.call_packed) → wrap in Evaluate
+                real_body.append(tvm.tirx.Evaluate(s))
+            elif s is not None and hasattr(s, "op") and hasattr(s, "args"):
+                # Non-TIR expr (e.g. relax.Call) → convert and wrap
+                try:
+                    tir_call = tvm.tirx.Call("", s.op, list(s.args))
+                    real_body.append(tvm.tirx.Evaluate(tir_call))
+                except Exception:
+                    pass
 
         # Build IterVars
         tir_iter_vars = []
@@ -541,7 +551,8 @@ def _to_buffer_regions(regions):
             # buf[vi, vj] → BufferRegion with point ranges
             ranges = []
             for idx in r.indices:
-                ranges.append(tvm.ir.Range.from_min_extent(idx, tvm.tirx.IntImm("int32", 1)))
+                idx_dtype = str(idx.dtype) if hasattr(idx, "dtype") else "int32"
+                ranges.append(tvm.ir.Range.from_min_extent(idx, tvm.tirx.IntImm(idx_dtype, 1)))
             result.append(tvm.tirx.BufferRegion(r.buffer, ranges))
     return result
 
