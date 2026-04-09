@@ -1459,15 +1459,30 @@ class _TIRModule:
 # ============================================================================
 
 
+class _RelaxMatchCastMarker:
+    """Marker for R.match_cast(value, struct_info) in Relax function body."""
+    def __init__(self, value, struct_info):
+        self.value = value
+        self.struct_info = struct_info
+
+
 class _RelaxFuncSurface(SurfaceObject):
     """Surface object for @R.function decorator."""
 
-    def __call__(self, *args, **kwargs):
-        # @R.function(private=True) → return self
-        return self
+    def __init__(self):
+        self._private = False
+        self._pure = True
+
+    def __call__(self, *args, private=False, pure=True, **kwargs):
+        # @R.function(private=True) → return configured self
+        surf = _RelaxFuncSurface()
+        surf._private = private
+        surf._pure = pure
+        return surf
 
     def parse_function(self, parser, node):
         from tvm import relax
+        from tvm_ffi import pyast
 
         bb = relax.BlockBuilder()
         params = []
@@ -1476,9 +1491,7 @@ class _RelaxFuncSurface(SurfaceObject):
             ann = None
             if arg.annotation is not None:
                 ann = parser.eval_expr(arg.annotation)
-            if isinstance(ann, relax.TensorStructInfo):
-                var = relax.Var(name, ann)
-            elif isinstance(ann, relax.StructInfo):
+            if isinstance(ann, relax.StructInfo):
                 var = relax.Var(name, ann)
             else:
                 var = relax.Var(name)
@@ -1491,45 +1504,76 @@ class _RelaxFuncSurface(SurfaceObject):
             ret_sinfo = parser.eval_expr(node.return_type)
 
         func_name = node.name.name
+        func_attrs = {}
 
         with bb.function(func_name, params):
             # Parse body statements → emit bindings
             for stmt in node.body:
-                from tvm_ffi import pyast
-
                 if isinstance(stmt, pyast.Assign) and stmt.rhs is not None:
                     rhs_val = parser.eval_expr(stmt.rhs)
                     name = stmt.lhs.name
-                    # Evaluate annotation for struct_info
-                    sinfo = None
-                    if stmt.annotation is not None:
-                        sinfo = parser.eval_expr(stmt.annotation)
-                    if isinstance(sinfo, relax.TensorStructInfo):
-                        var = bb.emit(rhs_val, name)
-                    else:
-                        var = bb.emit(rhs_val, name)
+                    if isinstance(rhs_val, _FuncAttrMarker):
+                        func_attrs.update(rhs_val.attrs)
+                        continue
+                    if isinstance(rhs_val, _RelaxMatchCastMarker):
+                        var = bb.match_cast(rhs_val.value, rhs_val.struct_info, name)
+                        parser.var_table.define(name, var)
+                        continue
+                    var = bb.emit(rhs_val, name)
                     parser.var_table.define(name, var)
                 elif isinstance(stmt, pyast.Return):
                     if stmt.value is not None:
                         ret_val = parser.eval_expr(stmt.value)
                         bb.emit_func_output(ret_val)
-                # Other statement types: skip for now
+                elif isinstance(stmt, pyast.ExprStmt):
+                    val = parser.eval_expr(stmt.expr)
+                    if isinstance(val, _FuncAttrMarker):
+                        func_attrs.update(val.attrs)
+                    elif val is not None:
+                        bb.emit(val)
+                # Skip other statement types
 
         mod = bb.get()
         func = mod[func_name]
+        # Build final attrs: start from BB attrs, strip global_symbol if private
+        final_attrs = dict(func.attrs) if func.attrs else {}
+        if self._private and "global_symbol" in final_attrs:
+            del final_attrs["global_symbol"]
+        final_attrs.update(func_attrs)
+        # Reconstruct function with correct attrs and is_pure
+        func = relax.Function(
+            func.params, func.body,
+            ret_struct_info=func.ret_struct_info,
+            is_pure=self._pure,
+            attrs=tvm.ir.make_node("ir.DictAttrs", **final_attrs) if final_attrs else None,
+        )
         return func
 
 
 class _RelaxTensorSInfo:
     """R.Tensor((3, 4), dtype='float32') → TensorStructInfo."""
-    def __call__(self, shape=None, dtype=None, ndim=-1):
+    def __call__(self, shape=None, dtype=None, ndim=-1, **kwargs):
         from tvm import relax
         if isinstance(shape, tuple):
             shape = list(shape)
-        return relax.TensorStructInfo(shape, dtype or "float32", ndim=ndim)
+        # When no dtype specified and no shape, dtype="" means unknown
+        # When shape specified but no dtype, dtype="" means unknown
+        if dtype is None:
+            dtype = ""
+        return relax.TensorStructInfo(shape, dtype, ndim=ndim)
 
 
-class _RelaxModule:
+class _RelaxModuleMeta(type):
+    """Metaclass for _RelaxModule to support dynamic op lookup via R.op_name."""
+    def __getattr__(cls, name):
+        # Try to find in tvm.relax.op
+        from tvm.relax import op
+        if hasattr(op, name):
+            return getattr(op, name)
+        raise AttributeError(f"type object '_RelaxModule' has no attribute '{name}'")
+
+
+class _RelaxModule(metaclass=_RelaxModuleMeta):
     """Language module for Relax (the 'R' in `from tvm.script import relax as R`)."""
 
     function = _RelaxFuncSurface()
@@ -1565,9 +1609,11 @@ class _RelaxModule:
         return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
 
     @staticmethod
-    def Shape(dims):
+    def Shape(dims=None, ndim=-1):
         from tvm import relax
-        return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+        if dims is not None:
+            return relax.ShapeStructInfo(dims if isinstance(dims, list) else list(dims))
+        return relax.ShapeStructInfo(ndim=ndim)
 
     @staticmethod
     def str(val):
@@ -1578,9 +1624,99 @@ class _RelaxModule:
         return val
 
     @staticmethod
-    def Prim(dtype="int64"):
+    def Prim(dtype="int64", value=None):
         from tvm import relax
+        if value is not None:
+            # R.Prim(value=16) — value is a PrimExpr
+            if isinstance(value, int):
+                import tvm.tirx
+                value = tvm.tirx.IntImm("int64", value)
+            return relax.PrimStructInfo(value=value)
         return relax.PrimStructInfo(dtype)
+
+    @staticmethod
+    def tuple(*args):
+        from tvm import relax
+        return relax.Tuple(list(args))
+
+    @staticmethod
+    def Callable(ret=None, params=None, purity=True):
+        from tvm import relax
+        if ret is None and params is None:
+            return relax.FuncStructInfo.opaque_func()
+        return relax.FuncStructInfo(params or [], ret)
+
+    @staticmethod
+    def ExternFunc(name):
+        from tvm import relax
+        return relax.ExternFunc(name)
+
+    @staticmethod
+    def match_cast(value, struct_info):
+        """R.match_cast(value, struct_info) → MatchCast marker."""
+        from tvm import relax
+        # If struct_info is the _RelaxTensorSInfo class (not called), call it
+        if isinstance(struct_info, _RelaxTensorSInfo):
+            struct_info = struct_info()
+        return _RelaxMatchCastMarker(value, struct_info)
+
+    @staticmethod
+    def call_tir(func, args, out_sinfo, tir_vars=None):
+        from tvm import relax
+        if isinstance(args, tuple):
+            args = relax.Tuple(list(args))
+        return relax.op.call_tir(func, args, out_sinfo, tir_vars=tir_vars)
+
+    @staticmethod
+    def call_packed(func_name, *args, sinfo_args=None, **kwargs):
+        from tvm import relax
+        if isinstance(func_name, str):
+            func_name = relax.ExternFunc(func_name)
+        sinfo = list(sinfo_args) if sinfo_args else [relax.ObjectStructInfo()]
+        return relax.Call(
+            relax.ExternFunc("call_packed") if isinstance(func_name, str) else func_name,
+            list(args),
+            sinfo_args=sinfo,
+        )
+
+    @staticmethod
+    def call_pure_packed(func, *args, sinfo_args=None, **kwargs):
+        from tvm import relax
+        sinfo = list(sinfo_args) if sinfo_args else [relax.ObjectStructInfo()]
+        return relax.op.call_pure_packed(func, *args, sinfo_args=sinfo)
+
+    @staticmethod
+    def assert_op(cond, msg=None, format=None):
+        from tvm import relax
+        args = [cond]
+        if format is not None:
+            args.append(format)
+        return relax.op.assert_op(cond, format or relax.StringImm(""))
+
+    @staticmethod
+    def const(val, dtype=None):
+        from tvm import relax
+        import numpy as np
+        if isinstance(val, (bool, int, float)):
+            if dtype:
+                return relax.const(np.array(val, dtype=dtype))
+            return relax.const(val)
+        return relax.const(val, dtype)
+
+    # --- Relax math/unary ops ---
+    @staticmethod
+    def _make_unary_op(op_name):
+        def _op(x):
+            from tvm.relax import op
+            return getattr(op, op_name)(x)
+        return _op
+
+    @staticmethod
+    def _make_binary_op(op_name):
+        def _op(x, y):
+            from tvm.relax import op
+            return getattr(op, op_name)(x, y)
+        return _op
 
 
 class _IRLangModule:
