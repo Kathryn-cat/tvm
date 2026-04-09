@@ -410,7 +410,17 @@ class _SBlockAttrMarker:
 class _AxisBinding:
     """Marker for T.axis.spatial(extent, value) — collected by sblock."""
     def __init__(self, extent, value, iter_type):
-        self.extent = extent
+        # Handle tuple/list extent as Range(begin, end) — e.g. T.axis.spatial((1,11), i+1)
+        # See example 223.
+        self.range_begin = None
+        if isinstance(extent, (tuple, list)) and len(extent) == 2:
+            begin, end = extent
+            if isinstance(begin, int): begin = tvm.tirx.IntImm("int32", begin)
+            if isinstance(end, int): end = tvm.tirx.IntImm("int32", end)
+            self.extent = tvm.arith.Analyzer().simplify(end - begin)
+            self.range_begin = begin
+        else:
+            self.extent = extent
         self.value = value
         self.iter_type = iter_type  # 0=spatial, 1=reduce, 2=scan, 3=opaque
 
@@ -529,7 +539,8 @@ class _SBlockSurfaceInstance(SurfaceObject):
         tir_iter_values = []
         for ab in iter_vars:
             ext_dtype = str(ab.extent.dtype) if hasattr(ab.extent, "dtype") else "int32"
-            dom = tvm.ir.Range(tvm.tirx.IntImm(ext_dtype, 0), ab.extent)
+            begin = ab.range_begin if ab.range_begin is not None else tvm.tirx.IntImm(ext_dtype, 0)
+            dom = tvm.ir.Range.from_min_extent(begin, ab.extent)
             var = ab._var  # set by _tir_make_assign when it sees _AxisBinding
             iv = tvm.tirx.IterVar(dom, var, ab.iter_type, "")
             tir_iter_vars.append(iv)
@@ -1041,10 +1052,10 @@ class _DtypeHelper:
 
 
 class _TIRModuleMeta(type):
-    """Metaclass for _TIRModule to support dynamic vector dtype lookup.
+    """Metaclass for _TIRModule to support dynamic vector dtype and intrinsic lookup.
 
-    Handles T.int32x4, T.float16x8, T.uint32x4, etc. by matching the
-    pattern <base_dtype>x<lanes> and returning a _DtypeHelper.
+    1. Vector dtypes: T.int32x4, T.float16x8, etc. → _DtypeHelper
+    2. TIR intrinsics: T.q_multiply_shift, T.ptx_mma_sp, etc. → tvm.tirx.* callables
     """
     _vector_dtype_re = None
 
@@ -1057,6 +1068,10 @@ class _TIRModuleMeta(type):
         m = cls._vector_dtype_re.match(name)
         if m:
             return _DtypeHelper(name)
+        # Fallback: try tvm.tirx.* (covers many intrinsics like q_multiply_shift, ptx_mma_sp)
+        import tvm.tirx
+        if hasattr(tvm.tirx, name):
+            return getattr(tvm.tirx, name)
         raise AttributeError(f"type object '_TIRModule' has no attribute '{name}'")
 
 
@@ -1462,12 +1477,30 @@ class _TIRModule(metaclass=_TIRModuleMeta):
 
     @staticmethod
     def tvm_storage_sync(scope):
-        return tvm.tirx.tvm_storage_sync(scope)
+        return tvm.tirx.call_intrin("", "tirx.tvm_storage_sync", scope)
 
     @staticmethod
     def call_cpacked(func_name, *args, dtype="int32"):
         call_args = [func_name if isinstance(func_name, tvm.tirx.PrimExpr) else tvm.tirx.StringImm(func_name), *args]
         return tvm.tirx.Call(dtype, tvm.ir.Op.get("tirx.tvm_call_cpacked"), call_args)
+
+    @staticmethod
+    def isnullptr(ptr):
+        return tvm.tirx.isnullptr(ptr)
+
+    @staticmethod
+    def tvm_thread_invariant(val):
+        return tvm.tirx.call_intrin(val.dtype if hasattr(val, "dtype") else "bool", "tirx.tvm_thread_invariant", val)
+
+    @staticmethod
+    def start_profile_intrinsic(id_val):
+        if isinstance(id_val, int): id_val = tvm.tirx.IntImm("int32", id_val)
+        return tvm.tirx.start_profile_intrinsic(id_val)
+
+    @staticmethod
+    def end_profile_intrinsic(id_val):
+        if isinstance(id_val, int): id_val = tvm.tirx.IntImm("int32", id_val)
+        return tvm.tirx.end_profile_intrinsic(id_val)
 
     @staticmethod
     def env_thread(thread_tag):
@@ -1783,13 +1816,36 @@ class _RelaxTensorSInfo:
         return relax.TensorStructInfo(shape, dtype, ndim=ndim)
 
 
+class _RelaxVMModule:
+    """Submodule for R.vm.* ops (alloc_storage, alloc_tensor, etc.)."""
+    def __getattr__(self, name):
+        from tvm.relax.op import vm
+        if hasattr(vm, name):
+            return getattr(vm, name)
+        raise AttributeError(f"'_RelaxVMModule' has no attribute '{name}'")
+
+
 class _RelaxModuleMeta(type):
     """Metaclass for _RelaxModule to support dynamic op lookup via R.op_name."""
     def __getattr__(cls, name):
+        # Submodules
+        if name == "vm":
+            return _RelaxVMModule()
+        if name == "device_mesh":
+            from tvm.relax.distributed import DeviceMesh
+            return DeviceMesh
+        if name == "DTensor":
+            from tvm.relax.distributed import DTensorStructInfo
+            return DTensorStructInfo
         # Try to find in tvm.relax.op
         from tvm.relax import op
         if hasattr(op, name):
             return getattr(op, name)
+        # Try submodules of relax.op (nn, image, memory, etc.)
+        for submod_name in ["nn", "image", "memory", "distributed", "ccl", "builtin"]:
+            submod = getattr(op, submod_name, None)
+            if submod and hasattr(submod, name):
+                return getattr(submod, name)
         raise AttributeError(f"type object '_RelaxModule' has no attribute '{name}'")
 
 
@@ -1821,7 +1877,9 @@ class _RelaxModule(metaclass=_RelaxModuleMeta):
     @staticmethod
     def Tuple(*args):
         from tvm import relax
-        return relax.TupleStructInfo(list(args))
+        # Convert bare _RelaxTensorSInfo → TensorStructInfo
+        fields = [a() if isinstance(a, _RelaxTensorSInfo) else a for a in args]
+        return relax.TupleStructInfo(fields)
 
     @staticmethod
     def _resolve_shape_dims(dims):
@@ -2038,6 +2096,10 @@ class _IRLangModule:
     @staticmethod
     def module_global_infos(infos_dict):
         return _ModuleGlobalInfosMarker(infos_dict)
+
+    @staticmethod
+    def Range(begin, end):
+        return range(begin, end)
 
     @staticmethod
     def vdevice(target_dict, vdevice_id=0, memory_scope="global"):
